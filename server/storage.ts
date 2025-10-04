@@ -1,6 +1,6 @@
-import { users, items, dayStates, type User, type InsertUser, type Item, type InsertItem, type UpdateItem, type DayState, type InsertDayState, type UpdateDayState } from "@shared/schema";
+import { users, items, dayStates, events, habitLearn, dailyRollup, type User, type InsertUser, type Item, type InsertItem, type UpdateItem, type DayState, type InsertDayState, type UpdateDayState, type Event, type InsertEvent, type HabitLearn, type DailyRollup } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, asc, gte, lte } from "drizzle-orm";
+import { eq, and, desc, asc, gte, lte, sql } from "drizzle-orm";
 
 export interface IStorage {
   // User methods
@@ -18,6 +18,34 @@ export interface IStorage {
   // Day state methods
   getDayState(userId: string, date: string): Promise<DayState | undefined>;
   upsertDayState(dayState: InsertDayState): Promise<DayState>;
+
+  // Event logging methods
+  logEvent(event: InsertEvent): Promise<Event>;
+  getRecentEvents(userId: string, days: number): Promise<Event[]>;
+
+  // Habit learning methods
+  getHabitLearn(userId: string): Promise<HabitLearn | null>;
+  upsertHabitLearn(data: {
+    userId: string;
+    windowJSON?: any;
+    lengthJSON?: any;
+    penalties?: any;
+    preferences?: any;
+  }): Promise<HabitLearn>;
+
+  // Daily rollup methods
+  getDailyRollup(userId: string, date: string): Promise<DailyRollup | null>;
+  upsertDailyRollup(data: {
+    userId: string;
+    date: string;
+    focusBlocksCompleted?: number;
+    snoozes?: number;
+    skips?: number;
+    avgStartDelayMin?: number;
+    sleepHours?: number;
+    waterMl?: number;
+    activeMinutes?: number;
+  }): Promise<DailyRollup>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -115,6 +143,93 @@ export class DatabaseStorage implements IStorage {
       const [created] = await db
         .insert(dayStates)
         .values(dayState)
+        .returning();
+      return created;
+    }
+  }
+
+  async logEvent(event: InsertEvent): Promise<Event> {
+    const [newEvent] = await db
+      .insert(events)
+      .values(event)
+      .returning();
+    return newEvent;
+  }
+
+  async getRecentEvents(userId: string, days: number): Promise<Event[]> {
+    return db
+      .select()
+      .from(events)
+      .where(
+        and(
+          eq(events.userId, userId),
+          gte(events.createdAt, sql`now() - interval '${sql.raw(days.toString())} days'`)
+        )
+      )
+      .orderBy(desc(events.createdAt));
+  }
+
+  async getHabitLearn(userId: string): Promise<HabitLearn | null> {
+    const [habit] = await db.select().from(habitLearn).where(eq(habitLearn.userId, userId));
+    return habit || null;
+  }
+
+  async upsertHabitLearn(data: {
+    userId: string;
+    windowJSON?: any;
+    lengthJSON?: any;
+    penalties?: any;
+    preferences?: any;
+  }): Promise<HabitLearn> {
+    const existing = await this.getHabitLearn(data.userId);
+    
+    if (existing) {
+      const [updated] = await db
+        .update(habitLearn)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(habitLearn.userId, data.userId))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db
+        .insert(habitLearn)
+        .values(data)
+        .returning();
+      return created;
+    }
+  }
+
+  async getDailyRollup(userId: string, date: string): Promise<DailyRollup | null> {
+    const [rollup] = await db.select().from(dailyRollup).where(
+      and(eq(dailyRollup.userId, userId), eq(dailyRollup.date, date))
+    );
+    return rollup || null;
+  }
+
+  async upsertDailyRollup(data: {
+    userId: string;
+    date: string;
+    focusBlocksCompleted?: number;
+    snoozes?: number;
+    skips?: number;
+    avgStartDelayMin?: number;
+    sleepHours?: number;
+    waterMl?: number;
+    activeMinutes?: number;
+  }): Promise<DailyRollup> {
+    const existing = await this.getDailyRollup(data.userId, data.date);
+    
+    if (existing) {
+      const [updated] = await db
+        .update(dailyRollup)
+        .set(data)
+        .where(and(eq(dailyRollup.userId, data.userId), eq(dailyRollup.date, data.date)))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db
+        .insert(dailyRollup)
+        .values(data)
         .returning();
       return created;
     }
