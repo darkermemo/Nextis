@@ -1,0 +1,273 @@
+Sweet—let’s wire Gmail → WeekMind so your assistant can read what’s next (invites, deadlines, follow-ups) and turn them into tasks/events automatically. No Python. This is for Next.js (App Router) + Node/TS using the official Google APIs.
+
+What you’ll get
+	•	OAuth sign-in with Google
+	•	Read-only Gmail (safe scope) → parse invites, deadlines, follow-ups
+	•	Auto-create items (meeting events, prep tasks, reminders)
+	•	Live updates via Gmail Push (Pub/Sub) so you don’t poll
+
+⸻
+
+1) Enable APIs & credentials (Google Cloud)
+	1.	Create a GCP project → enable Gmail API + Pub/Sub.
+	2.	OAuth 2.0 client (Web):
+	•	Authorized redirect URI → https://YOUR_DOMAIN/api/gmail/oauth/callback
+	3.	Create a Pub/Sub topic gmail-events and subscription gmail-events-sub.
+	4.	Add your service account as Pub/Sub Publisher (or use Watch with OAuth; service account is recommended for Pub/Sub push target verification).
+	5.	Verify the push endpoint: https://YOUR_DOMAIN/api/gmail/push.
+
+⸻
+
+2) Scopes (read-only & safe)
+
+Use the minimum:
+	•	https://www.googleapis.com/auth/gmail.readonly
+
+If you also want labels (optional): same scope covers it.
+
+⸻
+
+3) Install packages
+
+npm i googleapis google-auth-library
+
+
+⸻
+
+4) Secrets (.env)
+
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REDIRECT_URI=https://YOUR_DOMAIN/api/gmail/oauth/callback
+
+# Pub/Sub verification (push)
+GOOGLE_PUBSUB_VERIFICATION_TOKEN=change-me
+
+
+⸻
+
+5) Routes (Next.js App Router)
+
+A) Start OAuth
+
+app/api/gmail/oauth/start/route.ts
+
+import { NextResponse } from "next/server";
+import { google } from "googleapis";
+
+export async function GET() {
+  const oauth2 = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID!,
+    process.env.GOOGLE_CLIENT_SECRET!,
+    process.env.GOOGLE_REDIRECT_URI!
+  );
+  const url = oauth2.generateAuthUrl({
+    access_type: "offline",
+    prompt: "consent",
+    scope: ["https://www.googleapis.com/auth/gmail.readonly"]
+  });
+  return NextResponse.redirect(url);
+}
+
+B) OAuth callback → store tokens
+
+app/api/gmail/oauth/callback/route.ts
+
+import { NextRequest, NextResponse } from "next/server";
+import { google } from "googleapis";
+// TODO: persist tokens keyed by your userId (Prisma table GmailToken)
+
+export async function GET(req: NextRequest) {
+  const code = new URL(req.url).searchParams.get("code");
+  if (!code) return NextResponse.json({ error: "missing_code" }, { status: 400 });
+
+  const oauth2 = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID!, process.env.GOOGLE_CLIENT_SECRET!, process.env.GOOGLE_REDIRECT_URI!
+  );
+  const { tokens } = await oauth2.getToken(code);
+  // Save tokens.refresh_token, access_token, expiry_date for this user
+  // await prisma.gmailToken.upsert(...)
+
+  return NextResponse.redirect("/connected"); // your UI
+}
+
+C) Start Gmail Push “watch”
+
+app/api/gmail/watch/route.ts (one-time per user or after expiration)
+
+import { NextRequest, NextResponse } from "next/server";
+import { google } from "googleapis";
+// Load user tokens → oauth2.setCredentials(tokens)
+
+export async function POST(req: NextRequest) {
+  const oauth2 = /* build OAuth2 client with user tokens */;
+  const gmail = google.gmail({ version: "v1", auth: oauth2 });
+
+  const res = await gmail.users.watch({
+    userId: "me",
+    requestBody: {
+      topicName: "projects/YOUR_PROJECT/topics/gmail-events",
+      labelIds: ["INBOX"], // optional filter
+      labelFilterAction: "include"
+    }
+  });
+  // Store historyId from res.data.historyId for incremental sync
+  // await prisma.gmailState.upsert({ userId, historyId: res.data.historyId, ... })
+  return NextResponse.json({ ok: true });
+}
+
+D) Pub/Sub push endpoint (receives notifications)
+
+app/api/gmail/push/route.ts
+
+import { NextRequest, NextResponse } from "next/server";
+
+export async function POST(req: NextRequest) {
+  // Optionally check a verification token header you set in Pub/Sub
+  // const token = req.headers.get("X-Goog-Resource-State") ?? ...
+  const body = await req.json(); // { message: { data: base64, ... } }
+  const data = JSON.parse(Buffer.from(body.message.data, "base64").toString());
+  // data.emailAddress, data.historyId
+  // Enqueue a job to fetch Gmail history since last saved historyId
+  // await bull.enqueue("gmailSync", { userId, historyId: data.historyId });
+
+  return NextResponse.json({ ok: true });
+}
+
+
+⸻
+
+6) Sync worker (BullMQ job)
+
+Goal: Use users.history.list to get which messages changed since the last historyId, then fetch those messages.
+
+Pseudo-flow:
+
+// worker/gmailSync.ts
+import { google } from "googleapis";
+
+export async function syncGmail(userId: string) {
+  // 1) Load OAuth tokens for user → gmail client
+  // 2) Get last saved historyId
+  // 3) gmail.users.history.list({ userId:'me', startHistoryId, historyTypes:['messageAdded'] })
+  // 4) For each messageId → gmail.users.messages.get({ format:'metadata', metadataHeaders:['Subject','From','To','Date'] })
+  //    If needed, fetch full payload to parse ICS / links
+  // 5) Parse → create WeekMind Items (events/tasks) + reminders
+  // 6) Update stored historyId
+}
+
+
+⸻
+
+7) What to parse into “What’s next”
+
+A) Calendar invitations / events
+
+Patterns:
+	•	Content-Type: text/calendar (.ics)
+	•	Subject contains: “Invitation”, “Event”, “Meeting”, “RSVP”
+	•	From known calendar services (Google Calendar, Microsoft, Calendly, Zoom)
+
+Action:
+	•	Extract title, start/end, location/Zoom, organizer → create event (fixed), D-2 & T-5h reminders, add prep checklist (agenda, materials).
+
+B) Deadlines & action requests
+
+Queries you can run (Gmail search syntax) to find candidates:
+	•	subject:(deadline OR due OR submit) newer_than:7d
+	•	in:inbox (action required OR follow up OR reply) newer_than:7d
+	•	has:userlabels (if you auto-label with filters)
+
+Action:
+	•	Create tasks with due inferred from subject/body (use LLM only to extract dates/titles into JSON).
+	•	If unclear → create task with “Needs date” and notify for confirmation.
+
+C) PRs / code reviews (GitHub mails)
+	•	Subjects like [repo] Pull Request #123 or “Review requested”
+Action:
+	•	Create a 30–45m review block next high-success window; add link to PR.
+
+D) Travel & tickets (optional)
+	•	“Your flight,” “Booking,” “Reservation”
+Action:
+	•	Create fixed events + travel buffers; warn if conflicts.
+
+⸻
+
+8) Mapping to your data model
+
+Create Items:
+	•	type: event | task
+	•	fixed: true for event
+	•	title: from subject/ICS
+	•	start/end: for events; deadline for tasks
+	•	reminders: [D-2, T-5h] (events), [day-before, same-day] (tasks)
+	•	tags: ["gmail","invite"] / ["gmail","deadline"]
+	•	notes: thread link (https://mail.google.com/mail/u/0/#inbox/THREAD_ID)
+
+⸻
+
+9) LLM use (minimal, safe)
+	•	Only to extract structured fields when the subject/body isn’t clean.
+Example prompt → “Extract title, due date (ISO), duration estimate (minutes), priority. Output JSON only.”
+	•	Keep scope tiny (a few hundred characters around the sentence with the keyword), not the whole email.
+
+⸻
+
+10) “Next” logic boost (after Gmail sync)
+
+After every sync:
+	•	Recompute /api/next → if a new invite or deadline arrived, it can preempt lower-priority blocks.
+	•	If a meeting hits tonight and you have no prep, auto-insert 15–30m prep beforehand.
+
+⸻
+
+11) Prisma tables you’ll add
+
+model GmailToken {
+  userId       String  @id
+  accessToken  String
+  refreshToken String
+  expiryDate   BigInt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model GmailState {
+  userId     String @id
+  historyId  String
+  watchSetAt DateTime
+}
+
+(You already have Item for tasks/events.)
+
+⸻
+
+12) Quick “What’s Next” queries (server side)
+	•	New invites in last 48h → highest priority (fixed time)
+	•	Deadlines within 72h → next
+	•	Unreplied “action required” within 24h → follow-up block
+	•	PR reviews requested → 30–45m in your golden window
+
+⸻
+
+13) UX: one-tap connect & control
+	•	Button “Connect Gmail” → /api/gmail/oauth/start
+	•	Toggle “Auto-create tasks/events from emails”
+	•	Section “Email Sources” in Today view (show top 3 from Gmail with “Add to plan”/“Ignore”)
+
+⸻
+
+14) Guardrails
+	•	Read-only scope. No sending/archiving.
+	•	Store only message IDs + derived fields in your DB, not full email bodies (privacy).
+	•	Let the user delete any auto-created item.
+
+⸻
+
+If you want, I can provide a ready-to-paste sync worker (BullMQ) that:
+	•	consumes Pub/Sub push,
+	•	calls users.history.list,
+	•	pulls new messages,
+	•	parses invites/deadlines,
+	•	and writes Items + reminders in one go.

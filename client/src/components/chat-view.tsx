@@ -269,19 +269,19 @@ export function ChatView() {
       </div>
 
       {/* Chat Input Area */}
-      <div className="border-t border-border bg-card px-4 py-4 sm:px-6">
-        <form onSubmit={handleSubmit} className="flex gap-3">
+      <div className="border-t border-border bg-card px-3 py-3 sm:px-6 sm:py-4">
+        <form onSubmit={handleSubmit} className="flex gap-2 sm:gap-3">
           <div className="flex-1 relative">
             <input 
               type="text" 
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Type a message... (e.g., 'Meeting tomorrow at 2pm' or 'I have 3 homeworks')"
-              className="w-full px-4 py-3 pr-10 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-all"
+              placeholder="Type a message..."
+              className="w-full px-3 py-3 pr-12 rounded-lg border border-input bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-all text-base sm:text-sm min-h-[44px] sm:px-4"
               disabled={chatMutation.isPending}
               data-testid="chat-input"
             />
-            <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors">
+            <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors p-2 min-w-[44px] min-h-[44px] flex items-center justify-center sm:right-3">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
@@ -290,11 +290,14 @@ export function ChatView() {
           <button 
             type="submit" 
             disabled={!input.trim() || chatMutation.isPending}
-            className="px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed min-w-[44px] min-h-[44px] sm:px-6"
             data-testid="chat-send"
           >
-            <span>Send</span>
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <span className="hidden sm:inline">Send</span>
+            <svg className="w-5 h-5 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+            </svg>
+            <svg className="w-5 h-5 hidden sm:inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
             </svg>
           </button>

@@ -103,19 +103,19 @@ export function CalendarView() {
     <div className="h-full overflow-y-auto">
       <div className="p-4 sm:p-6">
         {/* Calendar Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 sm:mb-6">
           <div>
-            <h2 className="text-2xl font-bold text-foreground">
+            <h2 className="text-xl sm:text-2xl font-bold text-foreground">
               {currentWeek.format('MMMM YYYY')}
             </h2>
-            <p className="text-sm text-muted-foreground mt-1">
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1">
               Week of {currentWeek.format('MMM D')} - {currentWeek.endOf('week').format('MMM D')}
             </p>
           </div>
           <div className="flex items-center gap-2">
             <button 
               onClick={previousWeek}
-              className="p-2 hover:bg-muted rounded-lg transition-colors"
+              className="p-2 hover:bg-muted rounded-lg transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
               data-testid="previous-week"
             >
               <svg className="w-5 h-5 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -124,14 +124,14 @@ export function CalendarView() {
             </button>
             <button 
               onClick={goToToday}
-              className="px-4 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
+              className="px-3 py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors min-h-[44px] sm:px-4"
               data-testid="go-to-today"
             >
               Today
             </button>
             <button 
               onClick={nextWeek}
-              className="p-2 hover:bg-muted rounded-lg transition-colors"
+              className="p-2 hover:bg-muted rounded-lg transition-colors min-w-[44px] min-h-[44px] flex items-center justify-center"
               data-testid="next-week"
             >
               <svg className="w-5 h-5 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -142,7 +142,7 @@ export function CalendarView() {
         </div>
 
         {/* Calendar Grid */}
-        <div className="bg-card border border-border rounded-lg overflow-hidden">
+        <div className="bg-card border border-border rounded-lg overflow-x-auto overflow-y-hidden">
           <div className="calendar-grid">
             {/* Header Row */}
             <div className="bg-muted p-3 text-xs font-semibold text-muted-foreground"></div>

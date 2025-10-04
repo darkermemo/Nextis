@@ -1,0 +1,233 @@
+Awesome—here’s a drop-in feature pack you can paste into your Replit task list. It includes the two you asked for (context-aware notifications + weekly reflection), plus a handful of high-impact quick wins with precise API routes, planner hooks, DB fields, and worker jobs. No Python, no mocks.
+
+⸻
+
+✅ 0) Prereqs (unchanged)
+	•	Stack: Next.js (App Router) + TS, Postgres (Prisma), BullMQ + Redis, OpenAI/DeepSeek as already wired.
+	•	All mutating routes accept now?: ISO8601 for deterministic tests.
+
+⸻
+
+1) Context-Aware Notifications (reschedule + seize free time)
+
+New DB
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  kind      String   // suggestStart | rescheduleMiss | sitBreak | water | bedtime
+  payload   Json
+  scheduled DateTime
+  sentAt    DateTime?
+  createdAt DateTime @default(now())
+}
+
+API
+	•	POST /api/notify/ack
+Body: { notificationId, action: "accept"|"dismiss"|"snooze", now? }
+Effect:
+	•	accept: apply suggested plan change (e.g., bring study forward 60m)
+	•	snooze: requeue in +15m
+	•	dismiss: mark sentAt=now with no plan change
+
+Worker jobs
+	•	suggestStartIfFree (runs every 15m):
+	•	If free ≥45m and there’s a high-priority item within 48h → enqueue suggestStart notification.
+	•	rescheduleMissedBlocks (hourly):
+	•	If a block ended and item_done not logged → enqueue rescheduleMiss with a proposed new slot (use planner hook below).
+
+Planner hooks
+
+// lib/planner.ts
+export function proposeEarlierStart(state, now) { /* return {itemId, fromSlot, toSlot} or null */ }
+export function proposeReschedule(state, missedBlock, now) { /* find next feasible slot; respect curfew rules */ }
+
+
+⸻
+
+2) Weekly Reflection (auto summary + next-week tune)
+
+New DB (behavior rollup)
+
+model WeeklySummary {
+  id          String   @id @default(cuid())
+  userId      String
+  weekStart   DateTime // Monday 00:00 in user's TZ
+  tasksDone   Int
+  tasksSkipped Int
+  avgStartDelayMin Int
+  sleepMedianH Float?
+  activeMin   Int?
+  notes       String?
+  createdAt   DateTime @default(now())
+}
+
+Worker job
+	•	weeklySummary (Sun 22:00 local):
+	•	Aggregates last week events, writes WeeklySummary, updates HabitLearn (your learning table), and enqueues a reflection notification with 2–3 plan tweaks for next week.
+
+API
+	•	GET /api/weekly/summary?weekStart=YYYY-MM-DD → returns summary + applied tweaks.
+	•	POST /api/weekly/apply-tweaks { weekStart, tweaks[] } → re-scores next week’s plan (idempotent).
+
+⸻
+
+3) “Plan Explain” Mode (trust booster)
+
+API
+	•	GET /api/plan/explain?itemId=...
+Returns:
+
+{
+  "itemId":"...",
+  "why":[
+    "Evenings have 22% higher completion for study.",
+    "No heavy work ≤90m before bedtime.",
+    "Conflict with meeting at 21:00."
+  ],
+  "alternatives":[ { "slot":"Tue 18:30", "score":0.72 }, { "slot":"Wed 17:30", "score":0.69 } ]
+}
+
+
+
+Planner hook
+
+export function explainPlacement(item, context) { /* return why[] & alternatives[] using scores */ }
+
+
+⸻
+
+4) Smarter Break Insertion (learned + health-aware)
+
+API
+	•	POST /api/breaks/recompute { now? } → inserts micro-breaks where sedentary ≥50–60m or risk high.
+
+Planner hook
+
+export function insertMicroBreaks(state, now, healthDaily?) { /* add 5–10m breaks before heavy blocks */ }
+
+
+⸻
+
+5) Template Library (faster new task types)
+
+API
+	•	GET /api/templates → list predefined templates: exam, presentation, homework, project, reading, lab
+	•	POST /api/plan/apply-template { template, params, now? } → generates items and schedules.
+
+Minimal template contract
+
+type Template = (params) => GeneratedItems;
+// e.g., presentation -> outline/slider/rehearsal with default durations
+
+
+⸻
+
+6) Micro-Mood Check-ins (speed up learning)
+
+API
+	•	POST /api/mood/checkin { afterItemId, rating: "easy"|"ok"|"hard" }
+	•	Adjusts per-type target durations (EMA) and raises/lower penalties for that slot window.
+
+⸻
+
+7) Hydration & Sit-Break Triggers (MVP health wins)
+
+API
+	•	POST /api/hydration/goal { mlPerDay }
+	•	POST /api/health/ingest (already planned) accepts standMinutes, activeMinutes, waterMl.
+
+Worker jobs
+	•	waterReminders (every 90–120m daytime unless >80% goal)
+	•	sitBreakCheck (every 30m): if sedentary long window → enqueue sit-break notification or auto-insert 5m walk before next block.
+
+⸻
+
+8) Gym Autoplan v1 (targets + streak protection)
+
+DB
+
+model WorkoutPreference {
+  userId String @id
+  perWeek Int   @default(3)
+  defaultDurationMin Int @default(60)
+  preferredWindows Json? // e.g., ["Mon:18-20","Wed:18-20","Sat:10-12"]
+  updatedAt DateTime @updatedAt
+}
+
+API
+	•	POST /api/workout/prefs { perWeek, defaultDurationMin, preferredWindows? }
+	•	POST /api/workout/plan { weekStart?, now? } → fills this week with gym blocks in best windows; if streak broken, raises priority.
+
+⸻
+
+9) Syllabus RAG QoL
+
+API
+	•	POST /api/qa (already planned) add followUps?: boolean
+	•	If true, returns 2 suggested follow-ups (“Show all items due next week”, “Create study plan for Ch. 4”).
+
+⸻
+
+10) Learning: Operationalize (daily + weekly)
+
+Worker jobs
+	•	dailyLearn (23:30): roll up today’s events → update HabitLearn.windowJSON & lengthJSON.
+	•	weeklyLearn (Sun 22:05): derive next week’s golden windows + penalties; store in HabitLearn.penalties.
+
+Planner: use learned scores
+
+export function scoreSlot(weekday, hour, ctx, learn) { /* base-success - risk - curfew */ }
+
+
+⸻
+
+Minimal code stubs (paste and complete)
+
+/app/api/notify/ack/route.ts
+
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { applySuggestion } from "@/lib/planner";
+
+export async function POST(req: NextRequest) {
+  const { notificationId, action, now } = await req.json();
+  const n = await prisma.notification.findUnique({ where: { id: notificationId }});
+  if (!n) return NextResponse.json({ error: "not_found" }, { status: 404 });
+
+  if (action === "accept") {
+    await applySuggestion(n.payload, now);
+  } else if (action === "snooze") {
+    // requeue +15m
+    // enqueueBull("notification", { ...n, scheduled: addMinutes(now, 15) })
+  }
+  await prisma.notification.update({ where: { id: n.id }, data: { sentAt: new Date(now ?? Date.now()) }});
+  return NextResponse.json({ ok: true });
+}
+
+Weekly summary worker (BullMQ processor sketch)
+
+// worker/weeklySummary.ts
+export async function runWeeklySummary(userId: string, weekStartISO: string) {
+  // query events/items for [weekStart, weekStart+7)
+  // compute tasksDone, tasksSkipped, avgStartDelayMin, sleepMedianH, activeMin
+  // prisma.weeklySummary.upsert(...)
+  // update HabitLearn using your EMA functions
+  // enqueue reflection notification with 2–3 tweaks
+}
+
+
+⸻
+
+Rollout order (fastest)
+	1.	Context-Aware Notifications (#1)
+	2.	Weekly Reflection (#2)
+	3.	Plan Explain (#3)
+	4.	Break Insertion (#4)
+	5.	Micro-Mood Check-ins (#6)
+
+These five give you a noticeably smarter assistant with minimal new UI.
+
+⸻
+
+If you want, I can generate Prisma migration snippets for Notification, WeeklySummary, and WorkoutPreference, plus a BullMQ cron config you can paste into your worker to schedule the new jobs.

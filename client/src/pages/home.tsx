@@ -60,54 +60,54 @@ export default function Home() {
       )}
 
       {/* Tab Navigation */}
-      <nav className="bg-card border-b border-border px-4 sm:px-6 relative">
+      <nav className="bg-card border-b border-border px-3 sm:px-6 relative">
         <div className="flex gap-1">
           <button 
             onClick={() => setActiveTab("chat")}
-            className={`px-4 py-3 text-sm font-medium transition-colors ${
+            className={`px-3 py-3 text-sm font-medium transition-colors min-h-[44px] flex items-center ${
               activeTab === "chat" 
                 ? "text-primary border-b-2 border-primary" 
                 : "text-muted-foreground hover:text-foreground"
-            }`}
+            } sm:px-4`}
             data-testid="tab-chat"
           >
             <div className="flex items-center gap-2">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
-              Chat
+              <span className="hidden xs:inline sm:inline">Chat</span>
             </div>
           </button>
           <button 
             onClick={() => setActiveTab("tasks")}
-            className={`px-4 py-3 text-sm font-medium transition-colors ${
+            className={`px-3 py-3 text-sm font-medium transition-colors min-h-[44px] flex items-center ${
               activeTab === "tasks" 
                 ? "text-primary border-b-2 border-primary" 
                 : "text-muted-foreground hover:text-foreground"
-            }`}
+            } sm:px-4`}
             data-testid="tab-tasks"
           >
             <div className="flex items-center gap-2">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
               </svg>
-              Tasks
+              <span className="hidden xs:inline sm:inline">Tasks</span>
             </div>
           </button>
           <button 
             onClick={() => setActiveTab("calendar")}
-            className={`px-4 py-3 text-sm font-medium transition-colors ${
+            className={`px-3 py-3 text-sm font-medium transition-colors min-h-[44px] flex items-center ${
               activeTab === "calendar" 
                 ? "text-primary border-b-2 border-primary" 
                 : "text-muted-foreground hover:text-foreground"
-            }`}
+            } sm:px-4`}
             data-testid="tab-calendar"
           >
             <div className="flex items-center gap-2">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
-              Calendar
+              <span className="hidden xs:inline sm:inline">Calendar</span>
             </div>
           </button>
         </div>
