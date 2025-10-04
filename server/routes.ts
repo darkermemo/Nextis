@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { llmService } from "./services/openai";
 import { plannerEngine } from "./services/planner";
+import { learningService } from "./services/learning";
 import { z } from "zod";
 import { parsedIntentSchema, type Item } from "@shared/schema";
 import dayjs from "dayjs";
@@ -349,6 +350,188 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Day state error:", error);
       res.status(500).json({ error: "Failed to get day state" });
+    }
+  });
+
+  // Get learning preferences and stats
+  app.get("/api/learning/preferences", async (req, res) => {
+    try {
+      let habitLearn = await storage.getHabitLearn(mockUser.id);
+      if (!habitLearn) {
+        habitLearn = await learningService.initializeHabitLearn(mockUser.id);
+      }
+
+      const topWindows: Array<{weekday: string, hour: number, score: number}> = [];
+      for (const [weekday, scores] of Object.entries(habitLearn.windowJSON)) {
+        (scores as number[]).forEach((score, hour) => {
+          topWindows.push({ weekday, hour, score });
+        });
+      }
+      topWindows.sort((a, b) => b.score - a.score);
+      const top5Windows = topWindows.slice(0, 5);
+
+      const recentEvents = await storage.getRecentEvents(mockUser.id, 365);
+      const totalEvents = recentEvents.length;
+
+      const uniqueDates = new Set(recentEvents.map(e => dayjs(e.createdAt).format('YYYY-MM-DD')));
+      const daysTracked = uniqueDates.size;
+
+      res.json({
+        preferences: habitLearn.preferences,
+        stats: {
+          topWindows: top5Windows,
+          learnedLengths: habitLearn.lengthJSON,
+          totalEvents,
+          daysTracked
+        }
+      });
+    } catch (error) {
+      console.error("Learning prefs error:", error);
+      res.status(500).json({ error: "Failed to get learning preferences" });
+    }
+  });
+
+  // Update learning preferences
+  app.patch("/api/learning/preferences", async (req, res) => {
+    try {
+      const { preferEvening, maxContinuousFocus, pinnedWindows, bannedWindows } = req.body;
+
+      if (maxContinuousFocus !== undefined) {
+        if (typeof maxContinuousFocus !== 'number' || maxContinuousFocus < 30 || maxContinuousFocus > 120) {
+          return res.status(400).json({ error: "maxContinuousFocus must be between 30 and 120" });
+        }
+      }
+
+      let habitLearn = await storage.getHabitLearn(mockUser.id);
+      if (!habitLearn) {
+        habitLearn = await learningService.initializeHabitLearn(mockUser.id);
+      }
+
+      const updatedPreferences = {
+        ...habitLearn.preferences,
+        ...(preferEvening !== undefined && { preferEvening }),
+        ...(maxContinuousFocus !== undefined && { maxContinuousFocus }),
+        ...(pinnedWindows !== undefined && { pinnedWindows }),
+        ...(bannedWindows !== undefined && { bannedWindows })
+      };
+
+      const updatedHabitLearn = await storage.upsertHabitLearn({
+        userId: mockUser.id,
+        preferences: updatedPreferences
+      });
+
+      res.json({ preferences: updatedHabitLearn.preferences });
+    } catch (error) {
+      console.error("Update preferences error:", error);
+      res.status(500).json({ error: "Failed to update preferences" });
+    }
+  });
+
+  // Manually trigger daily learning update
+  app.post("/api/learning/update", async (req, res) => {
+    try {
+      const { timezone = "Asia/Riyadh" } = req.body;
+
+      await learningService.runDailyUpdate(mockUser.id, timezone);
+
+      let habitLearn = await storage.getHabitLearn(mockUser.id);
+      if (!habitLearn) {
+        habitLearn = await learningService.initializeHabitLearn(mockUser.id);
+      }
+
+      res.json({
+        success: true,
+        message: "Daily learning update completed",
+        stats: {
+          learnedLengths: habitLearn.lengthJSON
+        }
+      });
+    } catch (error) {
+      console.error("Learning update error:", error);
+      res.status(500).json({ error: "Failed to run learning update" });
+    }
+  });
+
+  // Reset learning data to defaults
+  app.post("/api/learning/reset", async (req, res) => {
+    try {
+      await storage.deleteHabitLearn(mockUser.id);
+
+      const newHabitLearn = await learningService.initializeHabitLearn(mockUser.id);
+
+      res.json({
+        success: true,
+        message: "Learning data reset to defaults",
+        preferences: newHabitLearn.preferences
+      });
+    } catch (error) {
+      console.error("Learning reset error:", error);
+      res.status(500).json({ error: "Failed to reset learning data" });
+    }
+  });
+
+  // Get learning insights
+  app.get("/api/learning/insights", async (req, res) => {
+    try {
+      let habitLearn = await storage.getHabitLearn(mockUser.id);
+      if (!habitLearn) {
+        habitLearn = await learningService.initializeHabitLearn(mockUser.id);
+      }
+
+      const weekdayPatterns: Record<string, number> = {};
+      for (const [weekday, scores] of Object.entries(habitLearn.windowJSON)) {
+        const avgScore = (scores as number[]).reduce((sum, s) => sum + s, 0) / (scores as number[]).length;
+        weekdayPatterns[weekday] = avgScore;
+      }
+
+      const hourlyPatterns: Record<string, number> = {};
+      for (let hour = 0; hour < 24; hour++) {
+        let totalScore = 0;
+        let count = 0;
+        for (const scores of Object.values(habitLearn.windowJSON)) {
+          totalScore += (scores as number[])[hour];
+          count++;
+        }
+        hourlyPatterns[hour.toString().padStart(2, '0')] = totalScore / count;
+      }
+
+      const last7Days = [];
+      const timezone = "Asia/Riyadh";
+      for (let i = 0; i < 7; i++) {
+        const date = dayjs().tz(timezone).subtract(i, 'day').format('YYYY-MM-DD');
+        const rollup = await storage.getDailyRollup(mockUser.id, date);
+        if (rollup) {
+          last7Days.push(rollup);
+        }
+      }
+
+      let completionRate = 0;
+      let avgSnoozes = 0;
+      let avgSkips = 0;
+
+      if (last7Days.length > 0) {
+        const totalFocus = last7Days.reduce((sum, r) => sum + (r.focusBlocksCompleted || 0), 0);
+        const totalSnoozes = last7Days.reduce((sum, r) => sum + (r.snoozes || 0), 0);
+        const totalSkips = last7Days.reduce((sum, r) => sum + (r.skips || 0), 0);
+
+        const totalActions = totalFocus + totalSnoozes + totalSkips;
+        completionRate = totalActions > 0 ? totalFocus / totalActions : 0;
+        avgSnoozes = totalSnoozes / last7Days.length;
+        avgSkips = totalSkips / last7Days.length;
+      }
+
+      res.json({
+        weekdayPatterns,
+        hourlyPatterns,
+        recentTrends: {
+          completionRate,
+          avgSnoozes,
+          avgSkips
+        }
+      });
+    } catch (error) {
+      console.error("Learning insights error:", error);
+      res.status(500).json({ error: "Failed to get learning insights" });
     }
   });
 

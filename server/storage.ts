@@ -32,6 +32,7 @@ export interface IStorage {
     penalties?: any;
     preferences?: any;
   }): Promise<HabitLearn>;
+  deleteHabitLearn(userId: string): Promise<boolean>;
 
   // Daily rollup methods
   getDailyRollup(userId: string, date: string): Promise<DailyRollup | null>;
@@ -197,6 +198,13 @@ export class DatabaseStorage implements IStorage {
         .returning();
       return created;
     }
+  }
+
+  async deleteHabitLearn(userId: string): Promise<boolean> {
+    const result = await db
+      .delete(habitLearn)
+      .where(eq(habitLearn.userId, userId));
+    return (result.rowCount ?? 0) > 0;
   }
 
   async getDailyRollup(userId: string, date: string): Promise<DailyRollup | null> {
