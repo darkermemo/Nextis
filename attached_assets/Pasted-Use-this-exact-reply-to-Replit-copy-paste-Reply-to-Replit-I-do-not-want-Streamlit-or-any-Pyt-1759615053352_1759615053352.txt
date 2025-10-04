@@ -1,0 +1,71 @@
+Use this exact reply to Replit (copy-paste):
+
+⸻
+
+Reply to Replit
+
+I do not want Streamlit or any Python. Proceed with Option 2 but make it a fullstack JavaScript/TypeScript app I can run on Replit now, and later connect to a native iOS client.
+
+Build exactly this:
+
+Stack
+	•	Backend: Node.js + TypeScript + Fastify, Zod for validation, OpenAI SDK for LLM parsing, dayjs/timezone.
+	•	Jobs/Reminders: BullMQ + Redis (Upstash).
+	•	Database: Postgres (Neon/Supabase) via Prisma.
+	•	Frontend (web console): Vite + React + TypeScript (minimal 3 tabs: Chat, Tasks, Calendar).
+	•	Auth: simple JWT for MVP (fastify-jwt).
+
+APIs
+	•	POST /chat/parse → LLM returns structured intent JSON.
+	•	POST /plan/apply → applies intent, schedules blocks, sets reminders.
+	•	GET /next → top 3 next actions.
+	•	GET /tasks / GET /events → lists.
+	•	POST /mood → set mood; reshuffle plan.
+	•	POST /early-work → toggle early-tomorrow; adjust bedtime.
+
+Features (MVP)
+	•	Chat box: “Exam next Friday / Meeting Thu 9pm / 3 homeworks next week / I’m tired today.”
+	•	Auto-create events/tasks, study/prep blocks, quizzes, coffee breaks, TV time.
+	•	Reminders: D-2 and T-5h for events; bedtime wind-down (bedtime−45m).
+	•	“Next 3” actions at the top of the Chat tab.
+	•	Tasks tab grouped: Today / This Week / Later.
+	•	Calendar tab: week view of time-blocks.
+
+Env (set in Replit Secrets)
+
+DATABASE_URL=postgresql://...
+REDIS_URL=redis://...
+OPENAI_API_KEY=...
+TZ=Asia/Riyadh
+BEDTIME_HOUR=22
+WORK_START_HOUR=9
+WORK_END_HOUR=18
+JWT_SECRET=change-me
+
+Packages
+
+pnpm add fastify fastify-jwt zod openai dayjs bullmq ioredis dotenv
+pnpm add prisma @prisma/client
+pnpm add -D typescript tsx vitest @types/node
+# frontend
+pnpm create vite@latest web -- --template react-ts
+pnpm --filter web add axios dayjs
+
+Project layout
+
+weekmind/
+  server/        # Fastify API
+  worker/        # BullMQ processors (reminders/reschedules)
+  web/           # Vite + React (3 tabs UI)
+  shared/        # zod schemas & types
+  prisma/        # schema.prisma
+  .env.example
+
+Acceptance (MVP)
+	•	I can send: “Exam next Friday” → exam + study blocks + quizzes appear; /next returns 3 items.
+	•	“Meeting Thu 9pm” → event created with D-2 and T-5h reminders.
+	•	“3 homeworks next week” → tasks created and distributed next week evenings.
+	•	“I’m tired today” + “work early tomorrow” → evening blocks shrink, bedtime enforced (no heavy work ≤90m before).
+	•	Web UI shows default page with a chat box and the Next 3 list at top; separate Tasks and Calendar tabs.
+
+Ship this now in Replit.

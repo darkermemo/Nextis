@@ -1,0 +1,309 @@
+Here’s a ready-to-paste build prompt for Cursor AI (works on Replit, too). It scaffolds a SwiftUI iOS app with your exact 3-tab UI (Chat / Tasks / Calendar), connects to an LLM provider, and wires an agentic planner that parses chat → creates tasks/events → schedules blocks → shows “Next 3.” It also includes mood check-ins and sleep-aware adjustments.
+
+Paste this into Cursor’s chat (project root) and run.
+
+⸻
+
+🔧 Cursor/Replit Build Prompt — “WeekMind” iOS App
+
+Goal: Build a SwiftUI iOS app “WeekMind” with 3 tabs:
+	1.	Chat (default): Top “Next 3” actions, text box to type commands.
+	2.	Tasks: Simple list grouped by Today / This Week / Later.
+	3.	Calendar: Week view showing scheduled blocks & events.
+
+Behavior:
+	•	Parse messages like:
+“I have exam on economics next Friday.”
+“Meeting Thursday at 9:00 pm.”
+“I have 3 homeworks next week.”
+“Add coffee breaks and TV time.”
+“I feel tired today; I have work early tomorrow.”
+	•	Create tasks/events, schedule study/prep blocks, insert breaks/leisure, set reminders (2 days before + 5 hours before), generate short quizzes pre-exam, show Next 3.
+	•	Mood check-in modifies schedule (tired → shorter work, earlier sleep).
+	•	Sleep policy: no heavy tasks within 90 minutes of bedtime; if “work early tomorrow,” set an earlier bedtime and reshuffle evening.
+
+⸻
+
+0) Project Setup
+
+Create a new SwiftUI iOS app:
+	•	Name: WeekMind
+	•	Minimum iOS: 17
+	•	Swift Concurrency (async/await)
+	•	Add package dependencies:
+	•	(Optional) EventKit (Apple framework; no package)
+	•	Swift Collections: apple/swift-collections
+	•	AnyCodable (or write a tiny wrapper) for LLM JSON
+	•	Create target build configs: Debug, Release
+
+Create folders:
+
+WeekMind/
+  Sources/
+    App/
+    Features/
+      Chat/
+      Tasks/
+      Calendar/
+      Mood/
+      Planner/
+      Quiz/
+    Services/
+      LLM/
+      Scheduling/
+      Storage/
+      Calendar/
+      Notifications/
+    Models/
+    Design/
+  Tests/
+  Config/
+
+Create .env.example:
+
+LLM_PROVIDER=openai
+LLM_API_KEY=YOUR_KEY_HERE
+LLM_MODEL=gpt-4o-mini
+
+Note: Use ProcessInfo.processInfo.environment to read at runtime (for local dev, add to scheme Env Vars).
+
+⸻
+
+1) Data Models (Sources/Models)
+
+Implement Swift models:
+
+enum ItemType: String, Codable { case task, event, breakTime, leisure, quiz }
+enum Priority: String, Codable { case high, normal, low }
+enum Mood: String, Codable { case tired, stressed, motivated, focused, relaxed, none }
+
+struct WMItem: Identifiable, Codable, Hashable {
+  let id: UUID
+  var type: ItemType
+  var title: String
+  var notes: String?
+  var start: Date?
+  var end: Date?
+  var durationMinutes: Int?
+  var deadline: Date?
+  var fixed: Bool // events/meetings are fixed; blocks can move
+  var priority: Priority
+  var subtasks: [WMSubtask]
+  var reminders: [Date] // absolute reminder times
+  var tags: [String]
+  var done: Bool
+}
+
+struct WMSubtask: Identifiable, Codable, Hashable {
+  let id: UUID
+  var title: String
+  var done: Bool
+}
+
+struct NextActions: Codable {
+  var items: [WMItem] // top 3 candidates in priority order
+}
+
+struct UserPrefs: Codable {
+  var workStartHour: Int
+  var workEndHour: Int
+  var bedtimeHour: Int
+  var allowEveningStudy: Bool
+  var defaultTVStartHour: Int
+}
+
+struct DayState: Codable {
+  var mood: Mood
+  var hasEarlyWorkTomorrow: Bool
+}
+
+
+⸻
+
+2) Storage (Services/Storage)
+	•	In-memory + simple FileManager JSON persistence (AppState.json).
+	•	API:
+	•	loadState(), saveState()
+	•	Collections: [WMItem], UserPrefs, DayState
+
+⸻
+
+3) Calendar & Notifications
+
+Calendar (EventKit) (Services/Calendar):
+	•	Request permissions.
+	•	Create events for fixed items (meetings/exams/presentations).
+	•	Keep calendarEventIdentifier mapping in WMItem.notes or a side map.
+
+Notifications (UserNotifications):
+	•	Request permission.
+	•	Schedule notifications for reminders and “bedtime wind-down.”
+
+⸻
+
+4) LLM Connector (Services/LLM)
+
+Create LLMClient.swift with pluggable backends:
+
+protocol LLMClient {
+  func parseCommand(_ text: String, now: Date, timezone: TimeZone) async throws -> ParsedIntent
+}
+
+struct ParsedIntent: Codable {
+  enum Kind: String, Codable {
+    case addExam, addMeeting, addHomeworks, addBreaks, addLeisureTV, setMood, setEarlyWork, genericTask
+  }
+  var kind: Kind
+  var title: String?
+  var date: String?
+  var time: String?
+  var count: Int?
+  var dueRange: String?
+  var durationMinutes: Int?
+  var priority: Priority?
+  var mood: Mood?
+  var earlyWorkTomorrow: Bool?
+}
+
+Function-calling prompt spec (send to LLM):
+
+System: “Extract a single JSON object matching this schema. Do not explain.”
+User text examples:
+	•	“I have exam on economics next Friday” → {kind:"addExam", title:"Economics Exam", date:"2025-10-10"}
+	•	“Meeting Thursday at 9:00 pm” → {kind:"addMeeting", title:"Meeting", date:"2025-10-09", time:"21:00"}
+	•	“I have 3 homeworks next week” → {kind:"addHomeworks", count:3, dueRange:"next-week"}
+	•	“I’m tired today” → {kind:"setMood", mood:"tired"}
+	•	“I have work early tomorrow” → {kind:"setEarlyWork", earlyWorkTomorrow:true}
+	•	“Add coffee breaks and TV time” → {kind:"addBreaks"} and {kind:"addLeisureTV"}
+
+Implement OpenAI backend using the Chat Completions (JSON mode) with LLM_MODEL. Keep the provider swappable.
+
+⸻
+
+5) Planner / Agent (Features/Planner + Services/Scheduling)
+
+Create PlannerEngine.swift:
+	•	Input: Current items, ParsedIntent, UserPrefs, DayState, now.
+	•	Output: Mutated items + generated schedule blocks + reminders + next actions.
+
+Policies (hard-code for MVP):
+	•	Events/meetings: fixed, add reminders D-2 and T-5h.
+	•	Exams: add event (time TBD or evening), create study blocks Mon–Thu (25–90m), quiz micro-sessions (10–15m Tue–Thu), cram 30–45m Thu evening (avoid conflict).
+	•	Homeworks: create N tasks due by next Friday; distribute blocks across Mon–Thu next week evenings.
+	•	Breaks: insert 10–15m every ~90m of work.
+	•	TV: default nightly 22:30–23:00 if free.
+	•	Mood tired/stressed: shrink or swap hard blocks to lighter review; if hasEarlyWorkTomorrow, advance bedtime by 60–90m; no heavy work ≤90m before bedtime.
+
+Scheduling algorithm (greedy + repair):
+	1.	Sort items by urgency (deadline proximity, priority).
+	2.	Place fixed events.
+	3.	Fit blocks into free slots inside working hours; respect bedtime policy.
+	4.	If overflow, push low-priority blocks; keep a change log for the UI.
+
+Expose functions:
+
+func apply(intent: ParsedIntent, state: inout AppState, now: Date)
+func recomputeNextThree(state: AppState, now: Date) -> NextActions
+
+
+⸻
+
+6) UI — Three Tabs
+
+6.1 Chat (Features/Chat)
+	•	Top card: Next 3 Actions (recomputeNextThree).
+	•	Text box + Send button.
+	•	On send: call LLM → ParsedIntent → PlannerEngine.apply → persist → refresh UI.
+	•	Show a small confirmation banner: “Added Exam + 4 study blocks + quizzes.”
+
+6.2 Tasks (Features/Tasks)
+	•	Group by: Today / This Week / Later.
+	•	Row: title, time range or deadline, quick “Done” / “Reschedule”.
+	•	Detail view: attributes, subtasks, lock/unlock, reminders.
+
+6.3 Calendar (Features/Calendar)
+	•	Simple week scroller (SwiftUI). Show blocks as rectangles.
+	•	Tap → details with “Open in Calendar” (if EventKit event exists).
+
+6.4 Mood (Features/Mood)
+	•	On first launch each day, present a small check-in pill at top of Chat: “How are you feeling?” (emoji choices).
+On tap → update DayState.mood and run PlannerEngine.apply for adaptive reshuffle.
+
+⸻
+
+7) Default Acceptance Scenario (MVP)
+
+Time zone: Asia/Riyadh. Today in dev tests: 2025-10-05.
+
+User types in Chat (separate messages, in any order):
+	•	“I have exam on economics next Friday.”
+	•	“I also have a meeting on Thursday at 9:00 pm.”
+	•	“I have 3 homeworks next week.”
+	•	“Add coffee breaks and TV shows time.”
+	•	“I’m tired today.”
+	•	“I have work early tomorrow.”
+	•	“I have a work presentation Wednesday.”
+
+Expected:
+	•	Exam event on Fri 2025-10-10 with reminders (D-2, T-5h), study blocks Mon–Thu, quizzes Tue–Thu, cram Thu evening before 20:45.
+	•	Meeting Thu 21:00 with reminders (D-2, T-5h), coffee break 20:30.
+	•	3 homework tasks due Fri 2025-10-17, blocks across Oct 13–17 evenings.
+	•	TV nightly 22:30–23:00 when free.
+	•	Presentation Wed 2025-10-08 with outline/draft/rehearse subtasks placed Mon–Wed.
+	•	Mood “tired” + early work tomorrow → earlier bedtime, shrink evening blocks, no heavy work ≤90m before bedtime.
+	•	Next 3 shows immediate priority (e.g., “Presentation outline 45m, Economics study 60m, Quick quiz 10m”).
+
+⸻
+
+8) Files to Generate (minimum)
+	•	Sources/App/WeekMindApp.swift (App entry)
+	•	Sources/Models/*.swift
+	•	Sources/Services/Storage/StorageService.swift
+	•	Sources/Services/LLM/LLMClient.swift (+ OpenAIClient.swift)
+	•	Sources/Services/Scheduling/PlannerEngine.swift
+	•	Sources/Services/Calendar/CalendarService.swift (EventKit wrapper)
+	•	Sources/Services/Notifications/NotificationService.swift
+	•	Sources/Features/Chat/ChatView.swift
+	•	Sources/Features/Tasks/TasksView.swift, TaskDetailView.swift
+	•	Sources/Features/Calendar/CalendarView.swift
+	•	Sources/Features/Mood/MoodPillView.swift
+	•	Sources/Features/Quiz/QuizService.swift (stub: generates 5 generic Qs per subject)
+	•	Config/AppConstants.swift
+	•	Tests/PlannerEngineTests.swift (unit tests for exam/meeting/homeworks flows)
+
+⸻
+
+9) QA Checklist (auto-verify in Simulator)
+	•	Launch → Chat is default; top shows Next 3 (empty on first run).
+	•	Enter “Exam next Friday” → confirmation banner; blocks appear in Calendar; items in Tasks.
+	•	Enter “Meeting Thu 9 pm” → event + reminders + coffee break.
+	•	Enter “3 homeworks next week” → tasks created; blocks placed next week.
+	•	Tap mood pill “tired” → evening plan shrinks; earlier bedtime enforced.
+	•	Toggle “work early tomorrow” (temporary button in Chat toolbar) → no heavy work after 21:00.
+	•	Notifications scheduled for events (D-2, T-5h) and bedtime wind-down.
+
+⸻
+
+10) Developer Notes
+	•	Keep logic pure & testable in PlannerEngine.
+	•	Use Calendar only for fixed items; blocks live in app state (and optionally mirror to Calendar as “time-blocks” if user consents).
+	•	Make all generated changes reversible (keep a simple change log array).
+	•	Do not block UI on LLM calls; show a small spinner in the Chat send button.
+	•	Add a DEMO_MODE flag to skip real EventKit/notifications.
+
+⸻
+
+Build now. Generate all files, compile, and produce a runnable iOS Simulator app with stubbed LLM (fallback static parser if no key), then allow easy swap to real provider via .env or Scheme Env Vars.
+
+⸻
+
+Follow-up Commands (paste one at a time after build)
+	1.	“Add UI tests ensuring ‘Next 3’ updates after each Chat command.”
+	2.	“Implement real OpenAI JSON response parsing for ParsedIntent with error fallback to regex.”
+	3.	“Add ‘Lock’ on any block/event and teach PlannerEngine to respect it during reshuffles.”
+	4.	“Implement bedtime wind-down notification at bedtime−45m.”
+	5.	“Persist app state and reload cleanly across launches.”
+
+⸻
+
+That’s it. Paste the prompt into Cursor/Replit and run. If you want, I can also give you a seed test script that sends the exact scenario messages to validate the planner end-to-end.
