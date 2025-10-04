@@ -1,0 +1,186 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: hsl(220, 15%, 97%);
+  --foreground: hsl(222, 47%, 11%);
+  --card: hsl(0, 0%, 100%);
+  --card-foreground: hsl(222, 47%, 11%);
+  --popover: hsl(0, 0%, 100%);
+  --popover-foreground: hsl(222, 47%, 11%);
+  --primary: hsl(237, 84%, 60%);
+  --primary-foreground: hsl(0, 0%, 100%);
+  --secondary: hsl(215, 20%, 92%);
+  --secondary-foreground: hsl(222, 47%, 11%);
+  --muted: hsl(217, 19%, 95%);
+  --muted-foreground: hsl(215, 16%, 47%);
+  --accent: hsl(160, 60%, 50%);
+  --accent-foreground: hsl(0, 0%, 100%);
+  --destructive: hsl(0, 84%, 60%);
+  --destructive-foreground: hsl(0, 0%, 100%);
+  --success: hsl(142, 76%, 45%);
+  --warning: hsl(38, 92%, 50%);
+  --border: hsl(217, 19%, 89%);
+  --input: hsl(217, 19%, 89%);
+  --ring: hsl(237, 84%, 60%);
+  --chart-1: hsl(237, 84%, 60%);
+  --chart-2: hsl(160, 60%, 50%);
+  --chart-3: hsl(38, 92%, 50%);
+  --chart-4: hsl(142, 76%, 45%);
+  --chart-5: hsl(0, 84%, 60%);
+  --sidebar: hsl(0, 0%, 100%);
+  --sidebar-foreground: hsl(222, 47%, 11%);
+  --sidebar-primary: hsl(237, 84%, 60%);
+  --sidebar-primary-foreground: hsl(0, 0%, 100%);
+  --sidebar-accent: hsl(160, 60%, 50%);
+  --sidebar-accent-foreground: hsl(0, 0%, 100%);
+  --sidebar-border: hsl(217, 19%, 89%);
+  --sidebar-ring: hsl(237, 84%, 60%);
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-serif: Georgia, serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: hsl(222, 47%, 11%);
+  --foreground: hsl(220, 15%, 97%);
+  --card: hsl(222, 35%, 15%);
+  --card-foreground: hsl(220, 15%, 97%);
+  --popover: hsl(222, 35%, 15%);
+  --popover-foreground: hsl(220, 15%, 97%);
+  --primary: hsl(237, 84%, 60%);
+  --primary-foreground: hsl(0, 0%, 100%);
+  --secondary: hsl(215, 20%, 25%);
+  --secondary-foreground: hsl(220, 15%, 97%);
+  --muted: hsl(217, 19%, 20%);
+  --muted-foreground: hsl(215, 16%, 65%);
+  --accent: hsl(160, 60%, 50%);
+  --accent-foreground: hsl(222, 47%, 11%);
+  --destructive: hsl(0, 84%, 60%);
+  --destructive-foreground: hsl(0, 0%, 100%);
+  --success: hsl(142, 76%, 45%);
+  --warning: hsl(38, 92%, 50%);
+  --border: hsl(217, 19%, 25%);
+  --input: hsl(217, 19%, 25%);
+  --ring: hsl(237, 84%, 60%);
+  --sidebar: hsl(222, 35%, 15%);
+  --sidebar-foreground: hsl(220, 15%, 97%);
+  --sidebar-primary: hsl(237, 84%, 60%);
+  --sidebar-primary-foreground: hsl(0, 0%, 100%);
+  --sidebar-accent: hsl(160, 60%, 50%);
+  --sidebar-accent-foreground: hsl(222, 47%, 11%);
+  --sidebar-border: hsl(217, 19%, 25%);
+  --sidebar-ring: hsl(237, 84%, 60%);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+    font-family: var(--font-sans);
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}
+
+/* Animations */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+/* Calendar grid */
+.calendar-grid {
+  display: grid;
+  grid-template-columns: 60px repeat(7, 1fr);
+  gap: 1px;
+  background: hsl(var(--border));
+}
+
+.calendar-time-slot {
+  background: hsl(var(--card));
+  min-height: 60px;
+  position: relative;
+}
+
+.calendar-event {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 0.75rem;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.calendar-event:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+/* Task checkbox animation */
+.task-checkbox {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border: 2px solid hsl(var(--border));
+  border-radius: 4px;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s;
+}
+
+.task-checkbox:checked {
+  background: hsl(var(--accent));
+  border-color: hsl(var(--accent));
+}
+
+.task-checkbox:checked::after {
+  content: "✓";
+  position: absolute;
+  top: -2px;
+  left: 3px;
+  color: white;
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.task-checkbox:hover {
+  border-color: hsl(var(--primary));
+}
