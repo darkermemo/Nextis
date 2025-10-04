@@ -3,11 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { ChatView } from "../components/chat-view";
 import { TasksView } from "../components/tasks-view";
 import { CalendarView } from "../components/calendar-view";
+import { LearningView } from "../components/learning-view";
 import { MoodCheckIn } from "../components/mood-check-in";
 import { api } from "../lib/api";
 import type { DayState } from "../types";
 
-type Tab = "chat" | "tasks" | "calendar";
+type Tab = "chat" | "tasks" | "calendar" | "learning";
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("chat");
@@ -110,6 +111,22 @@ export default function Home() {
               <span className="hidden xs:inline sm:inline">Calendar</span>
             </div>
           </button>
+          <button 
+            onClick={() => setActiveTab("learning")}
+            className={`px-3 py-3 text-sm font-medium transition-colors min-h-[44px] flex items-center ${
+              activeTab === "learning" 
+                ? "text-primary border-b-2 border-primary" 
+                : "text-muted-foreground hover:text-foreground"
+            } sm:px-4`}
+            data-testid="tab-learning"
+          >
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+              </svg>
+              <span className="hidden xs:inline sm:inline">Learning</span>
+            </div>
+          </button>
         </div>
       </nav>
 
@@ -118,6 +135,7 @@ export default function Home() {
         {activeTab === "chat" && <ChatView />}
         {activeTab === "tasks" && <TasksView />}
         {activeTab === "calendar" && <CalendarView />}
+        {activeTab === "learning" && <LearningView />}
       </main>
     </div>
   );

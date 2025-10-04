@@ -61,3 +61,36 @@ export interface DayState {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface LearningPreferences {
+  preferEvening?: boolean;
+  maxContinuousFocus?: number;
+  pinnedWindows?: string[];
+  bannedWindows?: string[];
+}
+
+export interface LearningStats {
+  topWindows: Array<{
+    weekday: string;
+    hour: number;
+    score: number;
+  }>;
+  learnedLengths: Record<string, number>;
+  totalEvents: number;
+  daysTracked: number;
+}
+
+export interface LearningPreferencesResponse {
+  preferences: LearningPreferences;
+  stats: LearningStats;
+}
+
+export interface LearningInsights {
+  weekdayPatterns: Record<string, number>;
+  hourlyPatterns: Record<string, number>;
+  recentTrends: {
+    completionRate: number;
+    avgSnoozes: number;
+    avgSkips: number;
+  };
+}
