@@ -1,5 +1,6 @@
 import { storage } from "../storage";
-import type { ParsedIntent, Item, InsertItem, DayState, User, NextActions } from "@shared/schema";
+import type { ParsedIntent, Item, InsertItem, DayState, User, NextActions, HabitLearn } from "@shared/schema";
+import { learningService } from "./learning";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
@@ -10,6 +11,89 @@ dayjs.extend(timezone);
 dayjs.extend(customParseFormat);
 
 export class PlannerEngine {
+  // Get learning context for intelligent scheduling
+  private async getLearningContext(userId: string, date: dayjs.Dayjs, timezone: string) {
+    // Get or initialize HabitLearn data
+    let habitLearn = await storage.getHabitLearn(userId);
+    if (!habitLearn) {
+      habitLearn = await learningService.initializeHabitLearn(userId);
+    }
+
+    // Get day state for mood
+    const dayState = await storage.getDayState(userId, date.format("YYYY-MM-DD"));
+    const mood = dayState?.mood || 'none';
+
+    // Get sleep hours from daily rollup or use default
+    const rollup = await storage.getDailyRollup(userId, date.format("YYYY-MM-DD"));
+    const sleepH = rollup?.sleepHours || 7;
+
+    // Count meetings for the day
+    const dayItems = await storage.getItems(userId, {
+      start: date.startOf('day').toDate(),
+      end: date.endOf('day').toDate(),
+    });
+    const meetings = dayItems.filter(item => item.type === 'event').length;
+
+    return { habitLearn, mood, sleepH, meetings };
+  }
+
+  // Find best time slot using learning signals
+  private async findBestSlot(
+    userId: string,
+    day: dayjs.Dayjs,
+    timezone: string,
+    constraints: {
+      earliestHour: number;
+      latestHour: number;
+      durationMinutes: number;
+      avoidHours?: number[];
+    }
+  ): Promise<dayjs.Dayjs> {
+    const { habitLearn, mood, sleepH, meetings } = await this.getLearningContext(userId, day, timezone);
+    const weekday = day.format('ddd');
+
+    // Generate candidate slots
+    const slots: { hour: number; score: number }[] = [];
+    for (let hour = constraints.earliestHour; hour <= constraints.latestHour; hour++) {
+      // Skip avoided hours
+      if (constraints.avoidHours?.includes(hour)) continue;
+
+      // Check snooze risk for evening heavy tasks
+      const risk = learningService.snoozeRisk({ hour, sleepH, mood, meetings });
+      
+      // Skip high-risk slots (> 0.6) for tasks requiring focus
+      if (risk > 0.6 && constraints.durationMinutes > 45) continue;
+
+      // Score this slot using learning signals
+      const score = learningService.scoreSlot(
+        habitLearn,
+        weekday,
+        hour,
+        { sleepH, mood, meetings }
+      );
+
+      slots.push({ hour, score });
+    }
+
+    // Sort by score (highest first) and return best slot
+    if (slots.length === 0) {
+      // Fallback to earliest allowed hour if no good slots found
+      return day.hour(constraints.earliestHour).minute(0);
+    }
+
+    slots.sort((a, b) => b.score - a.score);
+    return day.hour(slots[0].hour).minute(0);
+  }
+
+  // Get learned duration for a task type, with fallback
+  private async getLearnedDuration(userId: string, type: string, fallbackMinutes: number): Promise<number> {
+    const habitLearn = await storage.getHabitLearn(userId);
+    if (!habitLearn || !habitLearn.lengthJSON || !habitLearn.lengthJSON[type]) {
+      return fallbackMinutes;
+    }
+    return habitLearn.lengthJSON[type];
+  }
+
   async applyIntent(intent: ParsedIntent, userId: string, timezone: string = "Asia/Riyadh"): Promise<{
     items: Item[];
     changes: string[];
@@ -87,12 +171,15 @@ export class PlannerEngine {
         break;
 
       case "genericTask":
+        // Use learned duration for tasks if not explicitly specified
+        const taskDuration = intent.durationMinutes || await this.getLearnedDuration(userId, "task", 30);
+        
         const taskItem = await storage.createItem({
           userId,
           type: "task",
           title: intent.title || "New Task",
           priority: intent.priority || "normal",
-          durationMinutes: intent.durationMinutes || 30,
+          durationMinutes: taskDuration,
           deadline: intent.date ? dayjs(intent.date).toDate() : undefined,
         });
         createdItems.push(taskItem);
@@ -123,7 +210,10 @@ export class PlannerEngine {
     });
     items.push(exam);
 
-    // Create study blocks (Mon-Thu before exam)
+    // Get learned duration for study sessions
+    const studyDuration = await this.getLearnedDuration(user.id, 'task', 90);
+
+    // Create study blocks (Mon-Thu before exam) using learning signals
     const studyDays = [];
     for (let i = 1; i <= 4; i++) {
       const studyDay = examDate.subtract(i, 'days');
@@ -133,30 +223,47 @@ export class PlannerEngine {
     }
 
     for (const studyDay of studyDays.reverse()) {
+      // Use learning signals to find best time slot for study block
+      const bestSlot = await this.findBestSlot(user.id, studyDay, timezone, {
+        earliestHour: user.workEndHour,
+        latestHour: user.bedtimeHour - 2,
+        durationMinutes: studyDuration,
+      });
+
       const studyBlock = await storage.createItem({
         userId: user.id,
         type: "task",
         title: `${intent.title || "Exam"} - Study Block`,
-        start: studyDay.hour(18).minute(0).toDate(),
-        end: studyDay.hour(19).minute(30).toDate(),
-        durationMinutes: 90,
+        start: bestSlot.toDate(),
+        end: bestSlot.add(studyDuration, 'minutes').toDate(),
+        durationMinutes: studyDuration,
         priority: "high",
         tags: ["study", "exam-prep"],
       });
       items.push(studyBlock);
     }
 
-    // Create quiz sessions (Tue-Thu)
+    // Get learned duration for quiz sessions
+    const quizDuration = await this.getLearnedDuration(user.id, 'quiz', 15);
+
+    // Create quiz sessions (Tue-Thu) using learning signals
     for (let i = 2; i <= 4; i++) {
       const quizDay = examDate.subtract(i, 'days');
       if (quizDay.day() >= 2 && quizDay.day() <= 4) {
+        // Use learning signals to find best time slot for quiz
+        const bestSlot = await this.findBestSlot(user.id, quizDay, timezone, {
+          earliestHour: user.workEndHour - 1,
+          latestHour: user.bedtimeHour - 1,
+          durationMinutes: quizDuration,
+        });
+
         const quiz = await storage.createItem({
           userId: user.id,
           type: "quiz",
           title: `${intent.title || "Exam"} - Quick Quiz`,
-          start: quizDay.hour(17).minute(0).toDate(),
-          end: quizDay.hour(17).minute(15).toDate(),
-          durationMinutes: 15,
+          start: bestSlot.toDate(),
+          end: bestSlot.add(quizDuration, 'minutes').toDate(),
+          durationMinutes: quizDuration,
           priority: "normal",
           tags: ["quiz", "exam-prep"],
         });
@@ -166,14 +273,22 @@ export class PlannerEngine {
 
     // Create cram session (Thu evening before, avoiding bedtime)
     const cramDay = examDate.subtract(1, 'days');
-    const bedtimeLimit = cramDay.hour(user.bedtimeHour - 1.5).minute(0);
+    const cramDuration = await this.getLearnedDuration(user.id, 'task', 60);
+    
+    // Use learning signals to find best time slot for cram session, avoiding snooze risk
+    const bestCramSlot = await this.findBestSlot(user.id, cramDay, timezone, {
+      earliestHour: user.workEndHour,
+      latestHour: user.bedtimeHour - 2,
+      durationMinutes: cramDuration,
+    });
+
     const cramSession = await storage.createItem({
       userId: user.id,
       type: "task",
       title: `${intent.title || "Exam"} - Final Cram`,
-      start: cramDay.hour(19).minute(0).toDate(),
-      end: cramDay.hour(20).minute(0).toDate(),
-      durationMinutes: 60,
+      start: bestCramSlot.toDate(),
+      end: bestCramSlot.add(cramDuration, 'minutes').toDate(),
+      durationMinutes: cramDuration,
       priority: "high",
       tags: ["cram", "exam-prep"],
     });
@@ -227,28 +342,38 @@ export class PlannerEngine {
     const count = intent.count || 1;
     const dueDate = dayjs().tz(timezone).add(1, 'week').day(5); // Next Friday
     
+    // Get learned duration for homework tasks
+    const homeworkDuration = await this.getLearnedDuration(user.id, 'task', 60);
+    
     for (let i = 1; i <= count; i++) {
       const homework = await storage.createItem({
         userId: user.id,
         type: "task",
         title: `Homework Assignment ${i}`,
         deadline: dueDate.toDate(),
-        durationMinutes: 60,
+        durationMinutes: homeworkDuration,
         priority: "normal",
         tags: ["homework"],
       });
       items.push(homework);
 
-      // Schedule work blocks across the week
+      // Schedule work blocks across the week using learning signals
       const workDay = dueDate.subtract(count - i + 1, 'days');
       if (workDay.day() >= 1 && workDay.day() <= 4) { // Mon-Thu
+        // Use learning signals to find best time slot for work block
+        const bestSlot = await this.findBestSlot(user.id, workDay, timezone, {
+          earliestHour: user.workEndHour,
+          latestHour: user.bedtimeHour - 2,
+          durationMinutes: homeworkDuration,
+        });
+
         const workBlock = await storage.createItem({
           userId: user.id,
           type: "task",
           title: `Work on Assignment ${i}`,
-          start: workDay.hour(19).minute(0).toDate(),
-          end: workDay.hour(20).minute(0).toDate(),
-          durationMinutes: 60,
+          start: bestSlot.toDate(),
+          end: bestSlot.add(homeworkDuration, 'minutes').toDate(),
+          durationMinutes: homeworkDuration,
           priority: "normal",
           tags: ["homework", "work-block"],
         });
