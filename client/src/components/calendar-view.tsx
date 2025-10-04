@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, Fragment } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import type { CalendarResponse } from "../types";
@@ -161,7 +161,7 @@ export function CalendarView() {
 
             {/* Time Slots */}
             {timeSlots.map((hour) => (
-              <React.Fragment key={hour}>
+              <Fragment key={hour}>
                 <div className="calendar-time-slot p-2 text-xs text-muted-foreground font-mono">
                   {hour.toString().padStart(2, '0')}:00
                 </div>
@@ -200,7 +200,7 @@ export function CalendarView() {
                     </div>
                   );
                 })}
-              </React.Fragment>
+              </Fragment>
             ))}
           </div>
         </div>

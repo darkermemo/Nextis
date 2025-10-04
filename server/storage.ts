@@ -40,28 +40,27 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getItems(userId: string, options: { start?: Date; end?: Date; type?: string } = {}): Promise<Item[]> {
-    let query = db.select().from(items).where(eq(items.userId, userId));
+    const conditions = [eq(items.userId, userId)];
 
-    if (options.start && options.end) {
-      query = query.where(
-        and(
-          eq(items.userId, userId),
-          gte(items.start, options.start.toISOString()),
-          lte(items.end, options.end.toISOString())
-        )
-      );
+    if (options.start) {
+      conditions.push(gte(items.start, options.start.toISOString()));
+    }
+
+    if (options.end) {
+      conditions.push(lte(items.end, options.end.toISOString()));
     }
 
     if (options.type) {
-      query = query.where(
-        and(
-          eq(items.userId, userId),
-          eq(items.type, options.type)
-        )
-      );
+      conditions.push(eq(items.type, options.type));
     }
 
-    return query.orderBy(asc(items.start), desc(items.priority));
+    const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
+
+    return db
+      .select()
+      .from(items)
+      .where(whereClause)
+      .orderBy(asc(items.start), desc(items.priority));
   }
 
   async getItem(id: string, userId: string): Promise<Item | undefined> {
@@ -74,7 +73,7 @@ export class DatabaseStorage implements IStorage {
   async createItem(item: InsertItem): Promise<Item> {
     const [newItem] = await db
       .insert(items)
-      .values(item)
+      .values(item as any)
       .returning();
     return newItem;
   }
@@ -82,7 +81,7 @@ export class DatabaseStorage implements IStorage {
   async updateItem(id: string, userId: string, updates: UpdateItem): Promise<Item | undefined> {
     const [updatedItem] = await db
       .update(items)
-      .set({ ...updates, updatedAt: new Date() })
+      .set({ ...updates, updatedAt: new Date() } as any)
       .where(and(eq(items.id, id), eq(items.userId, userId)))
       .returning();
     return updatedItem || undefined;
@@ -92,7 +91,7 @@ export class DatabaseStorage implements IStorage {
     const result = await db
       .delete(items)
       .where(and(eq(items.id, id), eq(items.userId, userId)));
-    return result.rowCount > 0;
+    return (result.rowCount ?? 0) > 0;
   }
 
   async getDayState(userId: string, date: string): Promise<DayState | undefined> {
