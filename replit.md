@@ -40,6 +40,17 @@ The frontend follows a feature-based organization with three main views:
 - Custom font stack: Inter for UI, JetBrains Mono for code elements
 - Responsive design with mobile-first breakpoints
 
+**Progressive Web App (PWA) & Mobile:**
+- PWA manifest for home screen installation on iOS and Android
+- Standalone display mode (app-like experience without browser chrome)
+- App icons: 192x192 and 512x512 PNG with maskable variants
+- iOS-specific meta tags for optimal home screen behavior
+- Touch targets meet iOS Human Interface Guidelines (44px minimum)
+- Mobile-optimized input fields (16px font to prevent zoom)
+- Safe area insets for notched devices (iPhone X and later)
+- Horizontal scroll calendar grid for mobile viewports
+- Fully responsive from 320px+ screen widths
+
 ### Backend Architecture
 
 **Technology Stack:**
