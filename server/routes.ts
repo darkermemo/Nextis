@@ -109,15 +109,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dayjs(req.query.weekStart as string).tz(timezone) : 
         dayjs().tz(timezone).startOf('week');
       
-      const items = await storage.getItems(mockUser.id, {
-        start: weekStart.toDate(),
-        end: weekStart.endOf('week').toDate(),
+      const weekEnd = weekStart.endOf('week');
+      
+      // Get all items for the user and filter in code
+      const allItems = await storage.getItems(mockUser.id);
+      
+      // Filter items that overlap with the week (start before week end AND end after week start)
+      const items = allItems.filter(item => {
+        if (!item.start) return false;
+        const itemStart = dayjs(item.start).tz(timezone);
+        const itemEnd = item.end ? dayjs(item.end).tz(timezone) : itemStart;
+        
+        // Item overlaps with week if it starts before week ends AND ends after week starts
+        return itemStart.isBefore(weekEnd) && itemEnd.isAfter(weekStart);
       });
 
       res.json({
         items,
         weekStart: weekStart.toISOString(),
-        weekEnd: weekStart.endOf('week').toISOString(),
+        weekEnd: weekEnd.toISOString(),
       });
     } catch (error) {
       console.error("Calendar error:", error);
@@ -131,11 +141,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { mood, timezone = "Asia/Riyadh" } = req.body;
       const today = dayjs().tz(timezone).format("YYYY-MM-DD");
       
+      // Get existing day state to preserve early work flag
+      const existingState = await storage.getDayState(mockUser.id, today);
+      
       const dayState = await storage.upsertDayState({
         userId: mockUser.id,
         date: today,
         mood,
-        hasEarlyWorkTomorrow: false, // Keep existing value or default
+        hasEarlyWorkTomorrow: existingState?.hasEarlyWorkTomorrow ?? false,
       });
 
       // Apply mood-based adjustments
@@ -154,10 +167,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { earlyWork, timezone = "Asia/Riyadh" } = req.body;
       const today = dayjs().tz(timezone).format("YYYY-MM-DD");
       
+      // Get existing day state to preserve mood
+      const existingState = await storage.getDayState(mockUser.id, today);
+      
       const dayState = await storage.upsertDayState({
         userId: mockUser.id,
         date: today,
-        mood: "none", // Keep existing value
+        mood: existingState?.mood ?? "none",
         hasEarlyWorkTomorrow: Boolean(earlyWork),
       });
 

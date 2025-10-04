@@ -393,8 +393,8 @@ export class PlannerEngine {
         type: item.type as any,
         priority: item.priority as any,
         durationMinutes: item.durationMinutes,
-        deadline: item.deadline?.toISOString() || null,
-        start: item.start?.toISOString() || null,
+        deadline: item.deadline ? (item.deadline instanceof Date ? item.deadline.toISOString() : item.deadline) : null,
+        start: item.start ? (item.start instanceof Date ? item.start.toISOString() : item.start) : null,
       })),
     };
   }

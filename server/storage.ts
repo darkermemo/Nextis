@@ -43,11 +43,11 @@ export class DatabaseStorage implements IStorage {
     const conditions = [eq(items.userId, userId)];
 
     if (options.start) {
-      conditions.push(gte(items.start, options.start.toISOString()));
+      conditions.push(gte(items.start, options.start));
     }
 
     if (options.end) {
-      conditions.push(lte(items.end, options.end.toISOString()));
+      conditions.push(lte(items.end, options.end));
     }
 
     if (options.type) {

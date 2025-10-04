@@ -1,0 +1,160 @@
+Here’s a compact, practical playbook to make WeekMind learn from you and auto-adjust future weeks—no ML zoo, just solid signals → simple models → measurable improvements.
+
+1) Log what matters (minimal analytics)
+
+Create one immutable table for behavior and a daily rollup.
+
+Events (append-only)
+	•	item_started, item_done, item_skipped, item_snoozed, item_moved
+	•	plan_autorescheduled, bedtime_hit, health_ingested
+	•	Context on every event: { itemId, type, durationPlanned, durationActual, startPlanned, startActual, mood, earlyWork, sleepHours, dayOfWeek, hourOfDay }
+
+Daily rollup (per user)
+	•	focusBlocksCompleted, snoozes, skips, avgStartDelayMin, sleepHours, waterMl, activeMinutes
+
+2) Features the planner can learn
+	•	Preferred focus windows by weekday (e.g., Mon 18–20 is “high success”).
+	•	Task-type fit by window (e.g., “homework” better 19–21 than 8–10).
+	•	Typical session length you actually complete (e.g., 45m vs 90m).
+	•	Snooze/skip risk predictors: late hour, low sleep, recent meetings, mood.
+	•	Overrun ratio: how often you needed more time than planned.
+
+3) Two learning loops (keep it simple)
+
+A) Short-term (online) — no training job
+
+Update moving averages daily from real behavior.
+	•	Window success score (per weekday × hourBlock):
+
+success(t) = α*doneRate(t-1) + (1-α)*doneRate(today)     // α≈0.8
+
+
+	•	Session length (per task type):
+
+targetLength = EMA(actualDurationWhenDone)                // clamp 30–90m
+
+
+	•	Snooze risk (logistic-like score without model):
+
+risk = w1*(hour>=21) + w2*(sleep<6h) + w3*(mood in {tired, stressed}) + w4*(3+ meetings today)
+
+Start with w1=0.4, w2=0.4, w3=0.3, w4=0.2 (cap at 1.0).
+
+B) Weekly (batch) — tiny model, still TS
+
+Once/week (Sun night), recompute:
+	•	Top 3 golden windows per weekday (highest success score).
+	•	Updated per-type target lengths.
+	•	Penalty table for late-night heavy tasks if last week had high skip/snooze after 21:00.
+	•	Hydration/health modifiers for the coming week (e.g., if sleep<6h median → reduce morning heavies).
+
+4) How the planner uses learned signals
+
+When placing each block:
+	1.	Pick window with max (windowSuccess − snoozeRiskPenalty − curfewPenalty).
+	2.	Set duration = min(original, targetLengthForType).
+	3.	If risk > 0.6, split the block (e.g., 2×35m) or swap to lighter task.
+	4.	Respect “no heavy ≤90m before bedtime”; if early-work next day, tighten.
+
+5) Concrete data schema (Prisma-style)
+
+model HabitLearn {
+  userId    String @id
+  // weekday 0-6 × 24 one-hour buckets; store success in [0..1]
+  windowJSON Json    // { "Mon":[0.2,0.3,...], "Tue":[...], ... }
+  // per task type learned target minutes
+  lengthJSON Json    // { "study":60, "slides":45, "quiz":15 }
+  // penalties
+  penalties Json     // { "nightHeavy":0.3, "lowSleep":0.2 }
+  updatedAt DateTime @updatedAt
+}
+
+6) Minimal update logic (TypeScript sketches)
+
+// after any day ends
+function updateWindows(learn: HabitLearn, dayEvents: Event[]) {
+  // compute doneRate per hour bucket for today
+  const doneByHour = Array(24).fill(0), totalByHour = Array(24).fill(0);
+  for (const e of dayEvents) if (e.kind==="item_done") {
+    const h = new Date(e.startActual).getHours();
+    doneByHour[h]++; totalByHour[h]++;
+  } else if (["item_skipped","item_snoozed"].includes(e.kind)) {
+    const h = new Date(e.startPlanned).getHours();
+    totalByHour[h]++;
+  }
+  const weekday = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][new Date().getDay()];
+  const arr = learn.windowJSON[weekday] ?? Array(24).fill(0.5);
+  for (let h=0; h<24; h++) {
+    const todayRate = totalByHour[h] ? doneByHour[h]/totalByHour[h] : 0.5;
+    arr[h] = 0.8*arr[h] + 0.2*todayRate; // EMA
+  }
+  learn.windowJSON[weekday] = arr;
+}
+
+function updateLengths(learn: HabitLearn, doneItems: Item[]) {
+  const byType: Record<string,{sum:number; n:number}> = {};
+  for (const it of doneItems) {
+    if (!it.durationActual) continue;
+    const t = it.type; (byType[t] ||= {sum:0,n:0});
+    byType[t].sum += it.durationActual; byType[t].n++;
+  }
+  for (const t in byType) {
+    const cur = learn.lengthJSON[t] ?? 60;
+    const avg = byType[t].sum/byType[t].n;
+    learn.lengthJSON[t] = Math.max(30, Math.min(90, 0.8*cur + 0.2*avg));
+  }
+}
+
+function snoozeRisk(ctx:{hour:number; sleepH:number; mood:string; meetings:number}) {
+  let r = 0;
+  if (ctx.hour>=21) r += 0.4;
+  if (ctx.sleepH<6) r += 0.4;
+  if (["tired","stressed"].includes(ctx.mood)) r += 0.3;
+  if (ctx.meetings>=3) r += 0.2;
+  return Math.min(1, r);
+}
+
+// planner scoring
+function scoreSlot(learn: HabitLearn, weekday: string, hour: number, ctx: any) {
+  const base = (learn.windowJSON[weekday] ?? Array(24).fill(0.5))[hour] || 0.5;
+  const risk = snoozeRisk(ctx);
+  const curfew = (hour>=21 ? (learn.penalties?.nightHeavy ?? 0.3) : 0);
+  return base - risk - curfew;
+}
+
+7) Where to run the learning
+	•	Daily cron (BullMQ job): roll up yesterday’s events → call updateWindows & updateLengths → persist HabitLearn.
+	•	Weekly cron (Sun 22:00): compute next week’s golden windows and store them (optional cache) for fast planning.
+
+8) Cold-start + exploration
+	•	Cold start defaults:
+	•	Windows = 0.5 everywhere, but bias toward early evening.
+	•	Lengths = 60m for study, 45m for slides, 15m for quizzes.
+	•	Add tiny exploration: 10–15% of blocks try the second-best window so the model keeps learning and doesn’t get stuck.
+
+9) User controls (crucial)
+	•	A “Learning” panel:
+	•	Toggle: Prefer evenings / mornings / neutral (multiplies scores).
+	•	Slider: Max continuous focus (30–120m).
+	•	Switches to pin or ban time windows (hard constraints).
+	•	One-tap reset learning (clear HabitLearn).
+
+10) Quality guardrails
+	•	Never push items past deadlines.
+	•	Keep a change log visible when learning shifts a plan (“Moved Econ Study to Tue 19:00—better success window.”).
+	•	If learning worsens completion two weeks in a row, lower its weight (fall back toward defaults automatically).
+
+11) Health-aware tie-in (optional, simple)
+	•	If sleep < 6h, add +0.2 penalty to scores for 06:00–11:00 slots on that day.
+	•	If very active day (workout + 10k steps), allow slightly longer evening block (e.g., +15m).
+
+12) Pass/Fail for “it learns”
+	•	By week 2, you should see:
+	•	Fewer snoozes/skips after 21:00 if late nights hurt you.
+	•	Session lengths converging to what you actually complete.
+	•	“Next 3” favors tasks in windows with higher success score.
+
+If you want, I can turn this into:
+	•	a Prisma migration (HabitLearn),
+	•	a BullMQ daily job that updates learning, and
+	•	a planner scoring function you can paste in now.
