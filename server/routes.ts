@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { llmService } from "./services/openai";
 import { plannerEngine } from "./services/planner";
 import { z } from "zod";
-import { parsedIntentSchema } from "@shared/schema";
+import { parsedIntentSchema, type Item } from "@shared/schema";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
@@ -14,6 +14,26 @@ dayjs.extend(timezone);
 
 // Mock user for MVP - in production, use proper auth
 const MOCK_USER_ID = "mock-user-id";
+
+async function buildEventContext(item: Item, userId: string, kind: string) {
+  const today = dayjs().format('YYYY-MM-DD');
+  const dayState = await storage.getDayState(userId, today);
+  const rollup = await storage.getDailyRollup(userId, today);
+  
+  return {
+    itemId: item.id,
+    type: item.type,
+    durationPlanned: item.durationMinutes ?? undefined,
+    durationActual: kind === 'item_done' ? item.durationMinutes ?? undefined : undefined,
+    startPlanned: item.start?.toISOString(),
+    startActual: new Date().toISOString(),
+    mood: dayState?.mood,
+    earlyWork: dayState?.hasEarlyWorkTomorrow,
+    sleepHours: rollup?.sleepHours ?? undefined,
+    dayOfWeek: dayjs().day().toString(),
+    hourOfDay: dayjs().hour(),
+  };
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Ensure mock user exists
@@ -195,18 +215,117 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/tasks/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const { done } = req.body;
+      const updates = req.body;
 
-      const updatedItem = await storage.updateItem(id, mockUser.id, { done: Boolean(done) });
+      const existingItem = await storage.getItem(id, mockUser.id);
+      
+      if (!existingItem) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+
+      const updatedItem = await storage.updateItem(id, mockUser.id, updates);
       
       if (!updatedItem) {
         return res.status(404).json({ error: "Task not found" });
+      }
+
+      if (updates.done && !existingItem.done) {
+        try {
+          const context = await buildEventContext(updatedItem, mockUser.id, 'item_done');
+          await storage.logEvent({
+            userId: mockUser.id,
+            kind: 'item_done',
+            itemId: id,
+            context,
+          });
+        } catch (eventError) {
+          console.error("Event logging error:", eventError);
+        }
       }
 
       res.json(updatedItem);
     } catch (error) {
       console.error("Task update error:", error);
       res.status(500).json({ error: "Failed to update task" });
+    }
+  });
+
+  // Snooze task
+  app.post("/api/tasks/:id/snooze", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { snoozeUntil } = req.body;
+
+      if (!snoozeUntil) {
+        return res.status(400).json({ error: "snoozeUntil timestamp is required" });
+      }
+
+      const existingItem = await storage.getItem(id, mockUser.id);
+      
+      if (!existingItem) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+
+      const updatedItem = await storage.updateItem(id, mockUser.id, {
+        start: new Date(snoozeUntil),
+      });
+
+      if (!updatedItem) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+
+      try {
+        const context = await buildEventContext(existingItem, mockUser.id, 'item_snoozed');
+        await storage.logEvent({
+          userId: mockUser.id,
+          kind: 'item_snoozed',
+          itemId: id,
+          context,
+        });
+      } catch (eventError) {
+        console.error("Event logging error:", eventError);
+      }
+
+      res.json(updatedItem);
+    } catch (error) {
+      console.error("Snooze error:", error);
+      res.status(500).json({ error: "Failed to snooze task" });
+    }
+  });
+
+  // Skip task
+  app.post("/api/tasks/:id/skip", async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      const existingItem = await storage.getItem(id, mockUser.id);
+      
+      if (!existingItem) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+
+      try {
+        const context = await buildEventContext(existingItem, mockUser.id, 'item_skipped');
+        await storage.logEvent({
+          userId: mockUser.id,
+          kind: 'item_skipped',
+          itemId: id,
+          context,
+        });
+      } catch (eventError) {
+        console.error("Event logging error:", eventError);
+      }
+
+      const deleted = await storage.deleteItem(id, mockUser.id);
+
+      if (!deleted) {
+        return res.status(404).json({ error: "Task not found" });
+      }
+
+      res.json({ success: true, message: "Task skipped" });
+    } catch (error) {
+      console.error("Skip error:", error);
+      res.status(500).json({ error: "Failed to skip task" });
     }
   });
 
