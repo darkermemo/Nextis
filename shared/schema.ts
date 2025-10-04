@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer, boolean, jsonb, uuid } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, integer, boolean, jsonb, uuid, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { desc } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -79,7 +80,9 @@ export const events = pgTable("events", {
     hourOfDay?: number;
   }>().notNull().default({}),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
-});
+}, (table) => ({
+  userIdCreatedAtIdx: index("events_user_id_created_at_idx").on(table.userId, desc(table.createdAt)),
+}));
 
 export const habitLearn = pgTable("habit_learn", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -116,7 +119,9 @@ export const dailyRollup = pgTable("daily_rollup", {
   waterMl: integer("water_ml"),
   activeMinutes: integer("active_minutes"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
-});
+}, (table) => ({
+  userIdDateUnique: uniqueIndex("daily_rollup_user_id_date_unique").on(table.userId, table.date),
+}));
 
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({

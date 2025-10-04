@@ -172,3 +172,71 @@ The system recognizes multiple intent types:
 - MVP uses mock user authentication (username: "demo")
 - Production-ready structure expects JWT-based auth (fastify-jwt mentioned in requirements)
 - Current implementation skips auth middleware for rapid prototyping
+
+### Habit Learning System
+
+**Purpose:**
+WeekMind learns from user behavior to automatically optimize scheduling over time. The system tracks completion patterns, preferred work windows, and session durations to make intelligent scheduling decisions.
+
+**Core Components:**
+
+1. **Event Logging** (events table):
+   - Append-only log of user behavior
+   - Event types: item_done, item_skipped, item_snoozed, item_started, item_moved, plan_autorescheduled, bedtime_hit, health_ingested
+   - Context includes: item details, durations, mood, sleep, day/hour
+   - Indexed on (userId, createdAt DESC) for efficient queries
+
+2. **Habit Learning Data** (habitLearn table):
+   - Per-user learned preferences and patterns
+   - windowJSON: Success scores (0-1) for each hour of each weekday
+   - lengthJSON: Learned session durations by item type (30-90 min)
+   - penalties: Risk penalties (nightHeavy, lowSleep)
+   - preferences: User controls (preferEvening, maxContinuousFocus, pinned/banned windows)
+   - Unique constraint on userId
+
+3. **Daily Rollup** (dailyRollup table):
+   - Daily aggregated metrics per user
+   - Tracks: focusBlocksCompleted, snoozes, skips, avgStartDelayMin, sleepHours, waterMl, activeMinutes
+   - Unique index on (userId, date) prevents duplicates
+
+**Learning Algorithms:**
+
+- **Window Success Scoring**: Uses EMA (Exponential Moving Average) with α=0.8
+  - Formula: `newScore = 0.8 * oldScore + 0.2 * todayCompletionRate`
+  - Tracks which time windows have highest completion rates
+  
+- **Session Length Adaptation**: Learns actual task durations
+  - Formula: `newLength = 0.8 * oldLength + 0.2 * avgActual`
+  - Clamped between 30-90 minutes
+  
+- **Snooze Risk Calculation**: Predicts likelihood of task avoidance
+  - Factors: late hour (+0.4), low sleep (+0.4), tired/stressed mood (+0.3), many meetings (+0.2)
+  - Used to avoid scheduling heavy tasks in risky time slots
+
+- **Slot Scoring**: Combines signals for intelligent scheduling
+  - Formula: `score = baseWindowSuccess - snoozeRisk - curfewPenalty`
+  - Planner uses highest-scoring slots for new tasks
+
+**API Endpoints:**
+- `GET /api/learning/preferences` - Get user's learning preferences and stats
+- `PATCH /api/learning/preferences` - Update learning preferences
+- `POST /api/learning/update` - Manually trigger daily learning update
+- `POST /api/learning/reset` - Reset learning to defaults
+- `GET /api/learning/insights` - Get visual insights (weekday/hourly patterns, trends)
+- `POST /api/tasks/:id/skip` - Skip task (logs event)
+- `POST /api/tasks/:id/snooze` - Snooze task (logs event)
+
+**Planner Integration:**
+- `findBestSlot()`: Uses learned window scores to pick optimal time slots
+- `getLearnedDuration()`: Applies learned session lengths to tasks
+- Snooze risk filtering: Avoids scheduling heavy tasks (>45 min) in high-risk slots
+- Cold start: Initializes with sensible defaults (evening bias 18:00-20:00)
+
+**UI Features:**
+- Learning tab with insights dashboard
+- Weekday and hourly success pattern visualizations
+- Top 5 best time windows display
+- Learned session lengths by task type
+- Recent trends (7-day completion rate, snoozes, skips)
+- Preference controls: evening preference toggle, max focus slider
+- Actions: manual update, reset to defaults
