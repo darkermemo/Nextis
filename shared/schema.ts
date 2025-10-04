@@ -19,6 +19,16 @@ export const users = pgTable("users", {
 export const itemTypeEnum = z.enum(["task", "event", "breakTime", "leisure", "quiz"]);
 export const priorityEnum = z.enum(["high", "normal", "low"]);
 export const moodEnum = z.enum(["tired", "stressed", "motivated", "focused", "relaxed", "none"]);
+export const eventKindEnum = z.enum([
+  "item_started",
+  "item_done",
+  "item_skipped",
+  "item_snoozed",
+  "item_moved",
+  "plan_autorescheduled",
+  "bedtime_hit",
+  "health_ingested"
+]);
 
 export const items = pgTable("items", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -50,6 +60,64 @@ export const dayStates = pgTable("day_states", {
   updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
 });
 
+export const events = pgTable("events", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind").$type<z.infer<typeof eventKindEnum>>().notNull(),
+  itemId: uuid("item_id").references(() => items.id, { onDelete: "cascade" }),
+  context: jsonb("context").$type<{
+    itemId?: string;
+    type?: string;
+    durationPlanned?: number;
+    durationActual?: number;
+    startPlanned?: string;
+    startActual?: string;
+    mood?: string;
+    earlyWork?: boolean;
+    sleepHours?: number;
+    dayOfWeek?: string;
+    hourOfDay?: number;
+  }>().notNull().default({}),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
+export const habitLearn = pgTable("habit_learn", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
+  windowJSON: jsonb("window_json").$type<{
+    Mon?: number[];
+    Tue?: number[];
+    Wed?: number[];
+    Thu?: number[];
+    Fri?: number[];
+    Sat?: number[];
+    Sun?: number[];
+  }>().notNull().default({}),
+  lengthJSON: jsonb("length_json").$type<Record<string, number>>().notNull().default({}),
+  penalties: jsonb("penalties").$type<Record<string, number>>().notNull().default({}),
+  preferences: jsonb("preferences").$type<{
+    preferEvening?: boolean;
+    maxContinuousFocus?: number;
+    pinnedWindows?: string[];
+    bannedWindows?: string[];
+  }>().notNull().default({}),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+export const dailyRollup = pgTable("daily_rollup", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  date: text("date").notNull(), // YYYY-MM-DD format
+  focusBlocksCompleted: integer("focus_blocks_completed").notNull().default(0),
+  snoozes: integer("snoozes").notNull().default(0),
+  skips: integer("skips").notNull().default(0),
+  avgStartDelayMin: integer("avg_start_delay_min"),
+  sleepHours: integer("sleep_hours"),
+  waterMl: integer("water_ml"),
+  activeMinutes: integer("active_minutes"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -73,6 +141,23 @@ export const insertDayStateSchema = createInsertSchema(dayStates).omit({
   mood: moodEnum,
 });
 
+export const insertEventSchema = createInsertSchema(events).omit({
+  id: true,
+  createdAt: true,
+}).extend({
+  kind: eventKindEnum,
+});
+
+export const insertHabitLearnSchema = createInsertSchema(habitLearn).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export const insertDailyRollupSchema = createInsertSchema(dailyRollup).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Update schemas
 export const updateItemSchema = insertItemSchema.partial();
 export const updateDayStateSchema = insertDayStateSchema.partial();
@@ -86,6 +171,12 @@ export type Item = typeof items.$inferSelect;
 export type InsertDayState = z.infer<typeof insertDayStateSchema>;
 export type UpdateDayState = z.infer<typeof updateDayStateSchema>;
 export type DayState = typeof dayStates.$inferSelect;
+export type InsertEvent = z.infer<typeof insertEventSchema>;
+export type Event = typeof events.$inferSelect;
+export type InsertHabitLearn = z.infer<typeof insertHabitLearnSchema>;
+export type HabitLearn = typeof habitLearn.$inferSelect;
+export type InsertDailyRollup = z.infer<typeof insertDailyRollupSchema>;
+export type DailyRollup = typeof dailyRollup.$inferSelect;
 
 // API schemas
 export const parsedIntentSchema = z.object({
