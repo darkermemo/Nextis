@@ -2,9 +2,9 @@ import { storage } from "../storage";
 import type { ParsedIntent, Item, InsertItem, DayState, User, NextActions, HabitLearn } from "@shared/schema";
 import { learningService } from "./learning";
 import dayjs from "dayjs";
-import utc from "dayjs/plugin/utc";
-import timezone from "dayjs/plugin/timezone";
-import customParseFormat from "dayjs/plugin/customParseFormat";
+import utc from "dayjs/plugin/utc.js";
+import timezone from "dayjs/plugin/timezone.js";
+import customParseFormat from "dayjs/plugin/customParseFormat.js";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
