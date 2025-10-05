@@ -272,7 +272,65 @@ export class PlannerEngine {
       case "addMeeting":
         const meetingItems = await this.createMeetingPlan(intent, user, timezone);
         createdItems.push(...meetingItems);
-        changes.push(`Scheduled meeting with reminders and break buffer`);
+        {
+          const meeting = meetingItems.find(i => i.type === 'event' && i.start);
+          if (meeting && meeting.start) {
+            const start = dayjs(meeting.start).tz(timezone);
+            const end = meeting.end
+              ? dayjs(meeting.end).tz(timezone)
+              : start.add(meeting.durationMinutes || 60, 'minutes');
+
+            changes.push(
+              `Meeting scheduled ${start.format('ddd MMM D, h:mm A')}–${end.format('h:mm A')}`,
+            );
+
+            // Detect conflicts on the same day
+            const dayItems = await storage.getItems(user.id, {
+              start: start.startOf('day').toDate(),
+              end: start.endOf('day').toDate(),
+            });
+            const conflicts = dayItems.filter(other => {
+              if (other.id === meeting.id || !other.start) return false;
+              const otherStart = dayjs(other.start).tz(timezone);
+              const otherEnd = other.end
+                ? dayjs(other.end).tz(timezone)
+                : otherStart.add(other.durationMinutes || 30, 'minutes');
+              return otherStart.isBefore(end) && otherEnd.isAfter(start);
+            });
+
+            if (conflicts.length === 0) {
+              changes.push('No conflicts found');
+            } else {
+              const samples = conflicts.slice(0, 3)
+                .map(c => {
+                  const cs = dayjs(c.start!).tz(timezone);
+                  const ce = c.end ? dayjs(c.end).tz(timezone) : cs.add(c.durationMinutes || 30, 'minutes');
+                  return `${c.title} (${cs.format('h:mm A')}–${ce.format('h:mm A')})`;
+                })
+                .join(', ');
+              changes.push(
+                `Conflicts with ${conflicts.length} item(s): ${samples}${conflicts.length > 3 ? ', …' : ''}`,
+              );
+            }
+
+            // Note coffee break if added
+            const hadBreak = meetingItems.some(i => i.type === 'breakTime');
+            if (hadBreak) {
+              const br = meetingItems.find(i => i.type === 'breakTime');
+              if (br && br.start) {
+                const bs = dayjs(br.start).tz(timezone);
+                const be = br.end ? dayjs(br.end).tz(timezone) : bs.add(br.durationMinutes || 15, 'minutes');
+                changes.push(`Added Coffee Break ${bs.format('h:mm A')}–${be.format('h:mm A')}`);
+              } else {
+                changes.push('Added Coffee Break before meeting');
+              }
+            }
+
+            changes.push('Calendar updated');
+          } else {
+            changes.push('Scheduled meeting with reminders and break buffer');
+          }
+        }
         break;
 
       case "addHomeworks":

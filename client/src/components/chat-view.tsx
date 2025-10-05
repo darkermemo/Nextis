@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useToast } from "../hooks/use-toast";
@@ -16,14 +16,33 @@ interface ChatMessage {
 
 export function ChatView() {
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome",
-      type: "assistant",
-      content: "👋 Hi! I'm WeekMind, your intelligent planning assistant. I can help you manage tasks, schedule events, and optimize your time.\n\nTry saying things like:\n• \"I have an exam on economics next Friday\"\n• \"Meeting Thursday at 9:00 pm\"\n• \"I have 3 homeworks next week\"\n• \"Add coffee breaks and TV time\"\n\nOr click Quick Add to use templates!",
-      timestamp: new Date(),
-    }
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Load persisted chat on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("weekmind:chat");
+      if (raw) {
+        const parsed = JSON.parse(raw) as ChatMessage[];
+        setMessages(parsed.map(m => ({ ...m, timestamp: new Date(m.timestamp) })));
+      } else {
+        setMessages([{
+          id: "welcome",
+          type: "assistant",
+          content: "👋 Hi! I'm WeekMind, your intelligent planning assistant. I can help you manage tasks, schedule events, and optimize your time.\n\nTry saying things like:\n• \"I have an exam on economics next Friday\"\n• \"Meeting Thursday at 9:00 pm\"\n• \"I have 3 homeworks next week\"\n• \"Add coffee breaks and TV time\"\n\nOr click Quick Add to use templates!",
+          timestamp: new Date(),
+        }]);
+      }
+    } catch {}
+  }, []);
+
+  // Persist chat on change
+  useEffect(() => {
+    try {
+      if (messages.length) {
+        localStorage.setItem("weekmind:chat", JSON.stringify(messages));
+      }
+    } catch {}
+  }, [messages]);
   const [earlyWork, setEarlyWork] = useState(false);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
 
@@ -50,7 +69,7 @@ export function ChatView() {
       const assistantMessage: ChatMessage = {
         id: Date.now() + "-assistant",
         type: "assistant",
-        content: response.message,
+        content: formatAssistantMessage(response),
         timestamp: new Date(),
         response,
       };
@@ -96,6 +115,18 @@ export function ChatView() {
     chatMutation.mutate(input.trim());
     setInput("");
   };
+
+  function formatAssistantMessage(r: any) {
+    // Prefer detailed changes section
+    const lines: string[] = [];
+    if (Array.isArray(r?.changes) && r.changes.length) {
+      lines.push(r.changes.join("\n"));
+    }
+    if (typeof r?.message === 'string' && r.message) {
+      lines.push(r.message);
+    }
+    return lines.filter(Boolean).join("\n\n");
+  }
 
   const handleEarlyWorkToggle = () => {
     const newValue = !earlyWork;
