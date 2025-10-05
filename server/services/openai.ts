@@ -21,6 +21,8 @@ Examples:
 "I have exam on economics next Friday" → {"kind":"addExam", "title":"Economics Exam", "date":"2025-10-10"}
 "Meeting Thursday at 9:00 pm" → {"kind":"addMeeting", "title":"Meeting", "date":"2025-10-09", "time":"21:00"}
 "Appointment with dentist tomorrow at 3pm" → {"kind":"addMeeting", "title":"Dentist Appointment", "date":"2025-10-06", "time":"15:00"}
+"I have to meet mohammed tonight" → {"kind":"addMeeting", "title":"Meet Mohammed", "date":"2025-10-05", "time":"20:00"}
+"Meeting with team at 2pm" → {"kind":"addMeeting", "title":"Meeting with team", "date":"2025-10-05", "time":"14:00"}
 "I have 3 homeworks next week" → {"kind":"addHomeworks", "count":3, "dueRange":"next-week"}
 "I'm tired today" → {"kind":"setMood", "mood":"tired"}
 "I have work early tomorrow" → {"kind":"setEarlyWork", "earlyWorkTomorrow":true}
@@ -73,7 +75,7 @@ Dates in YYYY-MM-DD format, times in HH:mm format (24-hour).`;
       };
     }
 
-    if (lowerText.includes("meeting") || lowerText.includes("appointment")) {
+    if (lowerText.includes("meeting") || lowerText.includes("appointment") || lowerText.includes(" meet ") || lowerText.startsWith("meet ")) {
       return {
         kind: "addMeeting",
         title: text,
