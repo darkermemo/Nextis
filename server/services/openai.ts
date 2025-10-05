@@ -42,23 +42,22 @@ Dates in YYYY-MM-DD format, times in HH:mm format (24-hour).`;
           { role: "user", content: text }
         ],
         response_format: { type: "json_object" },
-        max_completion_tokens: 256,
+        max_completion_tokens: 2000,
       });
 
       const result = JSON.parse(response.choices[0].message.content || "{}");
       
       // Validate the response structure
       if (!result.kind) {
-        console.error("LLM response missing 'kind' field:", JSON.stringify(result, null, 2));
-        console.error("Full LLM response:", response.choices[0].message.content);
+        console.error("LLM response missing 'kind' field. This should not happen with sufficient tokens.");
         throw new Error("Invalid response from LLM: missing kind");
       }
 
       return result as ParsedIntent;
-    } catch (error) {
-      console.error("LLM parsing error:", error);
+    } catch (error: any) {
+      console.error("LLM parsing error, using fallback:", error?.message || error);
       
-      // Fallback regex parsing
+      // Fallback regex parsing (safety net for network issues)
       return this.fallbackParse(text);
     }
   }

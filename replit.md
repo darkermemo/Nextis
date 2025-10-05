@@ -133,10 +133,14 @@ The system recognizes multiple intent types:
 ### External Dependencies
 
 **OpenAI API Integration:**
-- Model: GPT-5 (latest as of the codebase)
+- Model: GPT-5 (`gpt-5-2025-08-07`)
 - JSON mode enabled for structured responses
 - System prompts include current date/time and timezone context
-- Fallback behavior with API key validation
+- Token limit: 2000 max_completion_tokens (increased from 256 to accommodate reasoning tokens)
+  - GPT-5 uses internal reasoning tokens that consume part of the completion budget
+  - Original 256 limit was entirely consumed by reasoning, leaving zero tokens for output
+  - 2000 tokens ensures sufficient room for both reasoning and JSON response
+- Fallback regex parser as safety net for network failures
 - Used exclusively for natural language to structured intent parsing
 
 **Neon Serverless PostgreSQL:**
