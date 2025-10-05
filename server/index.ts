@@ -1,8 +1,42 @@
 import express, { type Request, Response, NextFunction } from "express";
+import cors from "cors";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 
 const app = express();
+
+app.use(cors({
+  origin: (origin, callback) => {
+    const allowedOrigins = [
+      'null',
+      'capacitor://localhost',
+      'ionic://localhost',
+      'http://localhost:5000',
+      'http://localhost:5173',
+      'http://localhost:3000',
+      'http://127.0.0.1:5000',
+      'http://127.0.0.1:5173',
+      'http://127.0.0.1:3000',
+    ];
+
+    if (process.env.REPL_SLUG && process.env.REPL_OWNER) {
+      allowedOrigins.push(`https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`);
+      allowedOrigins.push(`https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.replit.dev`);
+    }
+
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'), false);
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  exposedHeaders: ['Set-Cookie'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204
+}));
 
 declare module 'http' {
   interface IncomingMessage {
