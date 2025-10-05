@@ -2,9 +2,44 @@ import OpenAI from "openai";
 import type { ParsedIntent } from "@shared/schema";
 
 // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
-const openai = new OpenAI({ 
-  apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY_ENV_VAR || "sk-fake-key"
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY_ENV_VAR || "sk-fake-key",
 });
+
+const MODEL = process.env.OPENAI_MODEL || "gpt-5";
+
+// JSON Schema for structured outputs (Intent)
+export const IntentJsonSchema = {
+  name: "Intent",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["kind"],
+    properties: {
+      kind: {
+        type: "string",
+        enum: [
+          "addExam",
+          "addMeeting",
+          "addHomeworks",
+          "addBreaks",
+          "addLeisureTV",
+          "setMood",
+          "setEarlyWork",
+          "genericTask",
+        ],
+      },
+      title: { type: "string" },
+      date: { type: "string" },
+      time: { type: "string" },
+      count: { type: "number" },
+      durationMinutes: { type: "number" },
+      priority: { type: "string" },
+      earlyWorkTomorrow: { type: "boolean" },
+    },
+  },
+  strict: true,
+} as const;
 
 export class LLMService {
   async parseCommand(text: string, timezone: string = "Asia/Riyadh"): Promise<ParsedIntent> {
@@ -79,17 +114,18 @@ INSTRUCTIONS:
 - If unsure between kinds, prefer the more specific one (e.g., addExam over genericTask for test-related requests)
 - Do not explain, just return valid JSON`;
 
-      const response = await openai.chat.completions.create({
-        model: "gpt-5",
-        messages: [
+      // Prefer structured outputs via Responses API
+      const r = await openai.responses.create({
+        model: MODEL,
+        input: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: text }
+          { role: "user", content: text },
         ],
-        response_format: { type: "json_object" },
-        max_completion_tokens: 2000,
+        response_format: { type: "json_schema", json_schema: IntentJsonSchema },
       });
 
-      const result = JSON.parse(response.choices[0].message.content || "{}");
+      const asText = (r as any)?.output?.[0]?.content?.[0]?.text as string | undefined;
+      const result = asText ? JSON.parse(asText) : {};
       
       // Validate the response structure
       if (!result.kind) {
