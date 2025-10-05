@@ -522,6 +522,37 @@ export class PlannerEngine {
         }
         break;
 
+      case "addEvent":
+      case "addAppointment":
+      case "addSocial":
+        // Fixed-time events (appointment, social, general event)
+        const eventItems = await this.createEventPlan(intent, user, timezone);
+        createdItems.push(...eventItems);
+        {
+          const evt = eventItems.find(i => i.type === 'event' && i.start);
+          if (evt && evt.start) {
+            const start = dayjs(evt.start).tz(timezone);
+            const end = evt.end ? dayjs(evt.end).tz(timezone) : start.add(evt.durationMinutes || 60, 'minutes');
+            changes.push(`${intent.category || 'Event'} scheduled ${start.format('ddd MMM D, h:mm A')}–${end.format('h:mm A')}`);
+            changes.push('Calendar updated');
+          }
+        }
+        break;
+
+      case "addTask":
+        // Flexible task with deadline/estimate
+        const flexTaskItem = await this.createFlexibleTask(intent, user, timezone);
+        createdItems.push(flexTaskItem);
+        changes.push(`Added task: ${flexTaskItem.title}${intent.due || intent.before ? ` (due ${dayjs(intent.due || intent.before).format('MMM D')})` : ''}`);
+        break;
+
+      case "workoutPlan":
+        // Gym/workout sessions
+        const workoutItems = await this.createWorkoutPlan(intent, user, timezone);
+        createdItems.push(...workoutItems);
+        changes.push(`Scheduled ${workoutItems.length} workout sessions (${intent.estimateMinutes || 60}m each)`);
+        break;
+
       case "genericTask":
         // Use learned duration for tasks if not explicitly specified
         const taskDuration = intent.durationMinutes || await this.getLearnedDuration(userId, "task", 30);
@@ -546,8 +577,9 @@ export class PlannerEngine {
     const items: Item[] = [];
     const examDate = intent.date ? dayjs(intent.date).tz(timezone) : dayjs().tz(timezone).add(7, 'days');
     const examDuration = intent.durationMinutes ?? 120;
-    const examStart = intent.time
-      ? dayjs(`${examDate.format('YYYY-MM-DD')} ${intent.time}`).tz(timezone)
+    const timeStr = intent.startTime || intent.time;
+    const examStart = timeStr
+      ? dayjs(`${examDate.format('YYYY-MM-DD')} ${timeStr}`).tz(timezone)
       : examDate.hour(10).minute(0);
     const examEnd = examStart.add(examDuration, 'minutes');
     
@@ -669,8 +701,10 @@ export class PlannerEngine {
   private async createMeetingPlan(intent: ParsedIntent, user: User, timezone: string): Promise<Item[]> {
     const items: Item[] = [];
     const meetingDate = intent.date ? dayjs(intent.date).tz(timezone) : dayjs().tz(timezone).add(1, 'days');
-    const meetingTime = intent.time ? meetingDate.format('YYYY-MM-DD') + ' ' + intent.time : meetingDate.hour(21).minute(0);
-    const meetingStart = dayjs(meetingTime).tz(timezone);
+    const timeStr = intent.startTime || intent.time;
+    const meetingStart = timeStr 
+      ? dayjs(`${meetingDate.format('YYYY-MM-DD')} ${timeStr}`).tz(timezone)
+      : meetingDate.hour(21).minute(0);
     
     // Create meeting event
     const meeting = await storage.createItem({
@@ -701,6 +735,114 @@ export class PlannerEngine {
         tags: ["coffee", "pre-meeting"],
       });
       items.push(coffeeBreak);
+    }
+
+    return items;
+  }
+
+  private async createEventPlan(intent: ParsedIntent, user: User, timezone: string): Promise<Item[]> {
+    const items: Item[] = [];
+    const eventDate = intent.date ? dayjs(intent.date).tz(timezone) : dayjs().tz(timezone).add(1, 'days');
+    
+    // Use startTime if provided, otherwise time, otherwise default based on category
+    const timeStr = intent.startTime || intent.time;
+    let eventStart: dayjs.Dayjs;
+    if (timeStr) {
+      eventStart = dayjs(`${eventDate.format('YYYY-MM-DD')} ${timeStr}`).tz(timezone);
+    } else {
+      // Default times by category
+      const defaultHour = intent.category === 'appointment' ? 15 : intent.category === 'social' ? 19 : 21;
+      eventStart = eventDate.hour(defaultHour).minute(0);
+    }
+
+    // Determine end time
+    let eventEnd: dayjs.Dayjs;
+    if (intent.endTime) {
+      eventEnd = dayjs(`${eventDate.format('YYYY-MM-DD')} ${intent.endTime}`).tz(timezone);
+    } else if (intent.durationMinutes) {
+      eventEnd = eventStart.add(intent.durationMinutes, 'minutes');
+    } else {
+      // Default duration by category
+      const defaultDuration = intent.category === 'appointment' ? 30 : intent.category === 'social' ? 120 : 60;
+      eventEnd = eventStart.add(defaultDuration, 'minutes');
+    }
+
+    const event = await storage.createItem({
+      userId: user.id,
+      type: "event",
+      title: intent.title || "Event",
+      start: eventStart.toDate(),
+      end: eventEnd.toDate(),
+      fixed: true,
+      priority: intent.priority || "normal",
+      reminders: intent.category !== 'social' ? [
+        eventStart.subtract(2, 'days').hour(9).minute(0).toISOString(),
+        eventStart.subtract(5, 'hours').toISOString(),
+      ] : [],
+    });
+    items.push(event);
+
+    // Add coffee break before evening events
+    if (eventStart.hour() >= 19 && intent.category !== 'social') {
+      const coffeeBreak = await storage.createItem({
+        userId: user.id,
+        type: "breakTime",
+        title: "Coffee Break",
+        start: eventStart.subtract(30, 'minutes').toDate(),
+        end: eventStart.subtract(15, 'minutes').toDate(),
+        durationMinutes: 15,
+        priority: "low",
+        tags: ["coffee", "pre-event"],
+      });
+      items.push(coffeeBreak);
+    }
+
+    return items;
+  }
+
+  private async createFlexibleTask(intent: ParsedIntent, user: User, timezone: string): Promise<Item> {
+    const duration = intent.estimateMinutes || intent.durationMinutes || await this.getLearnedDuration(user.id, "task", 45);
+    
+    // Parse deadline
+    let deadline: Date | undefined;
+    if (intent.due || intent.before || intent.deadline) {
+      const deadlineStr = intent.before || intent.due || intent.deadline;
+      deadline = dayjs(deadlineStr!).tz(timezone).toDate();
+    }
+
+    const task = await storage.createItem({
+      userId: user.id,
+      type: "task",
+      title: intent.title || "Task",
+      priority: intent.priority || "normal",
+      durationMinutes: duration,
+      deadline,
+    });
+
+    return task;
+  }
+
+  private async createWorkoutPlan(intent: ParsedIntent, user: User, timezone: string): Promise<Item[]> {
+    const items: Item[] = [];
+    const count = intent.count || 3;
+    const duration = intent.estimateMinutes || intent.durationMinutes || 60;
+    const endDate = intent.due ? dayjs(intent.due).tz(timezone) : dayjs().tz(timezone).add(7, 'days');
+
+    // Distribute gym sessions across available days
+    for (let i = 0; i < count; i++) {
+      const sessionDay = dayjs().tz(timezone).add(i * 2, 'days'); // Every other day
+      if (sessionDay.isAfter(endDate)) break;
+
+      const session = await storage.createItem({
+        userId: user.id,
+        type: "task",
+        title: `Gym Session ${i + 1}`,
+        durationMinutes: duration,
+        priority: "normal",
+        tags: ["gym", "workout"],
+        deadline: endDate.toDate(),
+      });
+      items.push(session);
     }
 
     return items;

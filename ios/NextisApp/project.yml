@@ -1,0 +1,29 @@
+name: NextisApp
+options:
+  minimumXcodeGenVersion: 2.38.0
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  NextisApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: NextisApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.nextis.app
+        ALWAYS_SEARCH_USER_PATHS: NO
+        SWIFT_VERSION: 5.0
+    info:
+      path: NextisApp/Info.plist
+      properties:
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: false
+        API_BASE_URL: https://YOUR-BACKEND
+schemes:
+  NextisApp:
+    build:
+      targets:
+        NextisApp: [run, archive]

@@ -306,16 +306,26 @@ export type GmailState = typeof gmailState.$inferSelect;
 
 // API schemas
 export const parsedIntentSchema = z.object({
-  kind: z.enum(["addExam", "addMeeting", "addHomeworks", "addBreaks", "addLeisureTV", "setMood", "setEarlyWork", "genericTask"]),
+  kind: z.enum(["addEvent", "addExam", "addMeeting", "addAppointment", "addSocial", "addHomeworks", "addTask", "workoutPlan", "addBreaks", "addLeisureTV", "setMood", "setEarlyWork", "genericTask"]),
   title: z.string().optional(),
   date: z.string().optional(), // YYYY-MM-DD
   time: z.string().optional(), // HH:mm
+  startTime: z.string().optional(), // HH:mm
+  endTime: z.string().optional(), // HH:mm
+  rangeStart: z.string().optional(),
+  rangeEnd: z.string().optional(),
   count: z.number().optional(),
   dueRange: z.string().optional(),
   durationMinutes: z.number().optional(),
+  estimateMinutes: z.number().optional(),
   priority: priorityEnum.optional(),
   mood: moodEnum.optional(),
   earlyWorkTomorrow: z.boolean().optional(),
+  deadline: z.string().optional(),
+  due: z.string().optional(),
+  before: z.string().optional(),
+  category: z.string().optional(),
+  original: z.string().optional(),
 });
 
 export const nextActionsSchema = z.object({

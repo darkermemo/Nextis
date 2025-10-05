@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { ParsedIntent } from "@shared/schema";
+import { preParse } from "./preParse";
 
 // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
 const openai = new OpenAI({
@@ -19,9 +20,14 @@ export const IntentJsonSchema = {
       kind: {
         type: "string",
         enum: [
+          "addEvent",
           "addExam",
           "addMeeting",
+          "addAppointment",
+          "addSocial",
           "addHomeworks",
+          "addTask",
+          "workoutPlan",
           "addBreaks",
           "addLeisureTV",
           "setMood",
@@ -29,14 +35,21 @@ export const IntentJsonSchema = {
           "genericTask",
         ],
       },
+      original: { type: "string" },
       title: { type: "string" },
+      category: { type: "string", enum: ["meeting", "appointment", "social", "class", "other"] },
       date: { type: "string", description: "YYYY-MM-DD" },
       time: { type: "string", description: "HH:mm (24h)" },
+      startTime: { type: "string", description: "HH:mm (24h)" },
+      endTime: { type: "string", description: "HH:mm (24h)" },
       count: { type: "number" },
       durationMinutes: { type: "number" },
-      priority: { type: "string" },
+      estimateMinutes: { type: "number" },
+      priority: { type: "string", enum: ["high", "normal", "low"] },
       earlyWorkTomorrow: { type: "boolean" },
       deadline: { type: "string", description: "ISO or YYYY-MM-DD HH:mm" },
+      due: { type: "string", description: "ISO or YYYY-MM-DD" },
+      before: { type: "string", description: "ISO or YYYY-MM-DD HH:mm" },
       rangeStart: { type: "string", description: "YYYY-MM-DD HH:mm" },
       rangeEnd: { type: "string", description: "YYYY-MM-DD HH:mm" },
     },
@@ -48,6 +61,8 @@ export class LLMService {
   async parseCommand(text: string, timezone: string = "Asia/Riyadh"): Promise<ParsedIntent> {
     try {
       const now = new Date();
+      const hints = preParse(text, timezone);
+      
       const systemPrompt = `You are an intelligent planning assistant. Extract structured intent from natural language commands.
 
 CURRENT CONTEXT:
@@ -117,18 +132,27 @@ INSTRUCTIONS:
 - If unsure between kinds, prefer the more specific one (e.g., addExam over genericTask for test-related requests)
 - Do not explain, just return valid JSON`;
 
-      // Prefer structured outputs via Responses API
+      // Prefer structured outputs via Responses API with pre-parse hints
       const r = await openai.responses.create({
         model: MODEL,
         input: [
-          { role: "system", content: systemPrompt + "\nReturn ONE JSON. Prefer: exam/meeting -> addExam/addMeeting with date,time,durationMinutes; 'from X to Y' -> use rangeStart/rangeEnd; 'due' -> set deadline; 'estimate' -> set durationMinutes; priorities: high/normal/low." },
-          { role: "user", content: text },
+          { role: "system", content: systemPrompt + "\n\nGUIDELINES:\n- Use provided seed fields as authoritative; fill ONLY missing ones.\n- exam/midterm/test -> addExam with date,startTime,durationMinutes\n- meeting/sync -> addMeeting with date,startTime,durationMinutes\n- dentist/doctor/appointment -> addAppointment\n- wedding/party/dinner/social -> addSocial\n- 'from X to Y' -> use startTime/endTime\n- 'due'/'by'/'before' -> set due or before\n- 'estimate' -> set estimateMinutes\n- gym/workout sessions -> workoutPlan with count\n- If you cannot find date/time for an event, leave them null (do NOT invent)." },
+          { role: "user", content: `Seed: ${JSON.stringify(hints)}\n\nUser: ${text}\nTimezone: ${timezone}` },
         ],
         response_format: { type: "json_schema", json_schema: IntentJsonSchema },
       });
 
       const asText = (r as any)?.output?.[0]?.content?.[0]?.text as string | undefined;
-      const result = asText ? JSON.parse(asText) : {};
+      let result = asText ? JSON.parse(asText) : {};
+      
+      // Harden: if model downgraded kind, restore from pre-parse
+      if (hints.kind && result.kind === "genericTask" && /meeting|appointment|social|exam/.test(hints.category || hints.kind)) {
+        result.kind = hints.kind;
+        result.category = hints.category;
+      }
+      
+      // Merge hints for missing fields
+      result = { ...hints, ...result };
       
       // Validate the response structure
       if (!result.kind) {
