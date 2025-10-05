@@ -519,6 +519,30 @@ export class TemplateService {
 
     return items;
   }
+
+  async applyTemplate(
+    userId: string,
+    templateId: string,
+    params: any,
+    timezone: string = "Asia/Riyadh"
+  ): Promise<Item[]> {
+    switch (templateId) {
+      case 'exam':
+        return this.applyExamTemplate(userId, params, timezone);
+      case 'presentation':
+        return this.applyPresentationTemplate(userId, params, timezone);
+      case 'homework':
+        return this.applyHomeworkTemplate(userId, params, timezone);
+      case 'project':
+        return this.applyProjectTemplate(userId, params, timezone);
+      case 'reading':
+        return this.applyReadingTemplate(userId, params, timezone);
+      case 'lab':
+        return this.applyLabTemplate(userId, params, timezone);
+      default:
+        throw new Error('Unknown template');
+    }
+  }
 }
 
 export const templateService = new TemplateService();

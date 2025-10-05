@@ -100,7 +100,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.json({
         connected: !!gmailState,
-        emailAddress: gmailState?.email || null,
+        emailAddress: gmailState?.emailAddress || null,
         lastSyncAt: gmailState?.updatedAt?.toISOString() || null,
       });
     } catch (error) {
@@ -119,11 +119,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ error: "Gmail not connected" });
       }
 
-      const result = await gmailService.scanAndCreateItems(mockUser.id, timezone);
+      const result = await gmailService.syncUserGmail(mockUser.id, timezone);
 
       res.json({
         success: true,
-        itemsCreated: result.itemsCreated.length,
+        itemsCreated: result.itemsCreated,
         categories: result.categories,
       });
     } catch (error) {
@@ -1240,7 +1240,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Message is required" });
       }
 
-      const parsed = await llmService.parseIntent(message, timezone);
+      const parsed = await llmService.parseCommand(message, timezone);
 
       const intent = parsedIntentSchema.parse(parsed);
 
