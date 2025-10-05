@@ -24,7 +24,11 @@ app.use(cors({
       allowedOrigins.push(`https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.replit.dev`);
     }
 
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (process.env.REPLIT_DEV_DOMAIN) {
+      allowedOrigins.push(`https://${process.env.REPLIT_DEV_DOMAIN}`);
+    }
+
+    if (!origin || allowedOrigins.includes(origin) || origin?.includes('replit.dev') || origin?.includes('repl.co')) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'), false);

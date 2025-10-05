@@ -20,6 +20,7 @@ Extract a single JSON object matching this schema exactly. Do not explain or add
 Examples:
 "I have exam on economics next Friday" → {"kind":"addExam", "title":"Economics Exam", "date":"2025-10-10"}
 "Meeting Thursday at 9:00 pm" → {"kind":"addMeeting", "title":"Meeting", "date":"2025-10-09", "time":"21:00"}
+"Appointment with dentist tomorrow at 3pm" → {"kind":"addMeeting", "title":"Dentist Appointment", "date":"2025-10-06", "time":"15:00"}
 "I have 3 homeworks next week" → {"kind":"addHomeworks", "count":3, "dueRange":"next-week"}
 "I'm tired today" → {"kind":"setMood", "mood":"tired"}
 "I have work early tomorrow" → {"kind":"setEarlyWork", "earlyWorkTomorrow":true}
@@ -46,6 +47,8 @@ Dates in YYYY-MM-DD format, times in HH:mm format (24-hour).`;
       
       // Validate the response structure
       if (!result.kind) {
+        console.error("LLM response missing 'kind' field:", JSON.stringify(result, null, 2));
+        console.error("Full LLM response:", response.choices[0].message.content);
         throw new Error("Invalid response from LLM: missing kind");
       }
 
@@ -70,7 +73,7 @@ Dates in YYYY-MM-DD format, times in HH:mm format (24-hour).`;
       };
     }
 
-    if (lowerText.includes("meeting")) {
+    if (lowerText.includes("meeting") || lowerText.includes("appointment")) {
       return {
         kind: "addMeeting",
         title: text,
