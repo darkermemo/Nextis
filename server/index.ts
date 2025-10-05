@@ -5,7 +5,7 @@ import { setupVite, serveStatic, log } from "./vite";
 
 const app = express();
 
-app.use(cors({
+app.use('/api', cors({
   origin: (origin, callback) => {
     const allowedOrigins = [
       'null',
