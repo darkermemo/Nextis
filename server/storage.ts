@@ -1,4 +1,4 @@
-import { users, items, dayStates, events, habitLearn, dailyRollup, notifications, weeklySummary, workoutPreferences, type User, type InsertUser, type Item, type InsertItem, type UpdateItem, type DayState, type InsertDayState, type UpdateDayState, type Event, type InsertEvent, type HabitLearn, type DailyRollup, type Notification, type InsertNotification, type WeeklySummary, type InsertWeeklySummary, type WorkoutPreferences, type InsertWorkoutPreferences } from "@shared/schema";
+import { users, items, dayStates, events, habitLearn, dailyRollup, notifications, weeklySummary, workoutPreferences, gmailTokens, gmailState, type User, type InsertUser, type Item, type InsertItem, type UpdateItem, type DayState, type InsertDayState, type UpdateDayState, type Event, type InsertEvent, type HabitLearn, type DailyRollup, type Notification, type InsertNotification, type WeeklySummary, type InsertWeeklySummary, type WorkoutPreferences, type InsertWorkoutPreferences, type GmailToken, type InsertGmailToken, type GmailState, type InsertGmailState } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, asc, gte, lte, sql } from "drizzle-orm";
 
@@ -64,6 +64,14 @@ export interface IStorage {
   // Workout preferences methods
   getWorkoutPreferences(userId: string): Promise<WorkoutPreferences | null>;
   upsertWorkoutPreferences(prefs: InsertWorkoutPreferences & { userId: string }): Promise<WorkoutPreferences>;
+
+  // Gmail methods
+  getGmailToken(userId: string): Promise<GmailToken | null>;
+  upsertGmailToken(token: InsertGmailToken & { userId: string }): Promise<GmailToken>;
+  deleteGmailToken(userId: string): Promise<boolean>;
+
+  getGmailState(userId: string): Promise<GmailState | null>;
+  upsertGmailState(state: InsertGmailState & { userId: string }): Promise<GmailState>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -349,6 +357,61 @@ export class DatabaseStorage implements IStorage {
       const [created] = await db
         .insert(workoutPreferences)
         .values(prefs)
+        .returning();
+      return created;
+    }
+  }
+
+  async getGmailToken(userId: string): Promise<GmailToken | null> {
+    const [token] = await db.select().from(gmailTokens).where(eq(gmailTokens.userId, userId));
+    return token || null;
+  }
+
+  async upsertGmailToken(token: InsertGmailToken & { userId: string }): Promise<GmailToken> {
+    const existing = await this.getGmailToken(token.userId);
+    
+    if (existing) {
+      const [updated] = await db
+        .update(gmailTokens)
+        .set({ ...token, updatedAt: new Date() })
+        .where(eq(gmailTokens.userId, token.userId))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db
+        .insert(gmailTokens)
+        .values(token)
+        .returning();
+      return created;
+    }
+  }
+
+  async deleteGmailToken(userId: string): Promise<boolean> {
+    const result = await db
+      .delete(gmailTokens)
+      .where(eq(gmailTokens.userId, userId));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async getGmailState(userId: string): Promise<GmailState | null> {
+    const [state] = await db.select().from(gmailState).where(eq(gmailState.userId, userId));
+    return state || null;
+  }
+
+  async upsertGmailState(state: InsertGmailState & { userId: string }): Promise<GmailState> {
+    const existing = await this.getGmailState(state.userId);
+    
+    if (existing) {
+      const [updated] = await db
+        .update(gmailState)
+        .set({ ...state, updatedAt: new Date() })
+        .where(eq(gmailState.userId, state.userId))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db
+        .insert(gmailState)
+        .values(state)
         .returning();
       return created;
     }
