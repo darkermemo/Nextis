@@ -14,6 +14,8 @@ import { parsedIntentSchema, type Item } from "@shared/schema";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc.js";
 import timezone from "dayjs/plugin/timezone.js";
+import OpenAI from "openai";
+import { IntentJsonSchema } from "./services/openai";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -1260,6 +1262,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       res.status(500).json({ error: "Failed to process message" });
+    }
+  });
+
+  // Tool-calling: model orchestrates planner tools
+  app.post("/api/plan/apply", async (req, res) => {
+    try {
+      const { userId = MOCK_USER_ID, timezone = "Asia/Riyadh", intent, now } = req.body || {};
+      const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const model = process.env.OPENAI_MODEL || "gpt-5";
+
+      const tools = [
+        {
+          type: "function",
+          name: "apply_intent",
+          description: "Apply a parsed scheduling intent and return changes.",
+          parameters: {
+            type: "object",
+            required: ["intent", "timezone", "userId"],
+            properties: {
+              userId: { type: "string" },
+              timezone: { type: "string" },
+              intent: (IntentJsonSchema as any).schema,
+            },
+          },
+        },
+        {
+          type: "function",
+          name: "propose_reschedule",
+          description: "Suggest next best slot for a missed item (1-3 days).",
+          parameters: {
+            type: "object",
+            required: ["userId", "missedItemId", "now", "timezone"],
+            properties: {
+              userId: { type: "string" },
+              missedItemId: { type: "string" },
+              now: { type: "string" },
+              timezone: { type: "string" },
+            },
+          },
+        },
+      ];
+
+      const r = await client.responses.create({
+        model,
+        input: [
+          { role: "system", content: "You are a planning orchestrator. Call tools, then summarize changes succinctly." },
+          { role: "user", content: JSON.stringify({ userId, timezone, intent, now: now || new Date().toISOString() }) },
+        ],
+        tools,
+        tool_choice: "auto",
+      });
+
+      const toolResults: any[] = [];
+      for (const item of ((r as any).output ?? [])) {
+        for (const c of (item?.content ?? [])) {
+          if (c.type === "tool_call" && c.name === "apply_intent") {
+            const args = JSON.parse(c.arguments || '{}');
+            const parsed = parsedIntentSchema.parse(args.intent);
+            const out = await plannerEngine.applyIntent(parsed, args.userId, args.timezone);
+            toolResults.push({ tool: c.name, id: c.id, output: out });
+          }
+          if (c.type === "tool_call" && c.name === "propose_reschedule") {
+            const args = JSON.parse(c.arguments || '{}');
+            const out = await plannerEngine.proposeReschedule(args.userId, args.missedItemId, new Date(args.now), args.timezone);
+            toolResults.push({ tool: c.name, id: c.id, output: out });
+          }
+        }
+      }
+
+      return res.json({ toolResults });
+    } catch (err: any) {
+      console.error("/api/plan/apply error:", err?.message || err);
+      res.status(500).json({ error: "failed_to_apply_plan" });
+    }
+  });
+
+  // Realtime session: ephemeral session token for client to start Realtime (placeholder)
+  app.post("/api/realtime/session", async (_req, res) => {
+    try {
+      const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const model = process.env.OPENAI_MODEL || "gpt-5";
+      const session = await client.realtime.sessions.create({ model });
+      res.json(session);
+    } catch (err: any) {
+      console.error("/api/realtime/session error:", err?.message || err);
+      res.status(500).json({ error: "failed_to_create_session" });
     }
   });
 
