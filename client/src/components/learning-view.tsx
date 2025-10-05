@@ -22,6 +22,7 @@ import { Brain, TrendingUp, Clock, BarChart3, RefreshCw, RotateCcw, Coffee } fro
 import type { LearningPreferencesResponse, LearningInsights, User } from "../types";
 import { HealthTracker } from "./health-tracker";
 import { GymPlanner } from "./gym-planner";
+import { GmailIntegration } from "./gmail-integration";
 
 const WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -521,6 +522,9 @@ export function LearningView() {
 
       {/* Gym Planner */}
       <GymPlanner />
+
+      {/* Gmail Integration */}
+      <GmailIntegration />
 
       {/* Reset Confirmation Dialog */}
       <AlertDialog open={showResetDialog} onOpenChange={setShowResetDialog}>
