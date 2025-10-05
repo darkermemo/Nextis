@@ -145,13 +145,14 @@ INSTRUCTIONS:
       const asText = (r as any)?.output?.[0]?.content?.[0]?.text as string | undefined;
       let result = asText ? JSON.parse(asText) : {};
       
-      // Harden: if model downgraded kind, restore from pre-parse (always trust regex extraction)
-      if (hints.kind && hints.kind !== "addEvent" && result.kind === "genericTask") {
-        result.kind = hints.kind;
+      // Merge: preParse values are authoritative; only use model values if preParse didn't extract them
+      const merged: any = {};
+      for (const key of Object.keys({ ...hints, ...result })) {
+        // If preParse extracted a value (non-null/non-undefined), use it; otherwise use model's value
+        merged[key] = (hints[key] !== null && hints[key] !== undefined) ? hints[key] : result[key];
       }
       
-      // Merge hints for missing fields (preParse is authoritative for extracted values)
-      result = { ...hints, ...result, kind: hints.kind || result.kind };
+      result = merged;
       
       // Validate the response structure
       if (!result.kind) {
