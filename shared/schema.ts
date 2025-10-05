@@ -184,6 +184,26 @@ export const workoutPreferences = pgTable("workout_preferences", {
   updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
 });
 
+export const gmailTokens = pgTable("gmail_tokens", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token"),
+  expiryDate: text("expiry_date").notNull(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
+export const gmailState = pgTable("gmail_state", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
+  historyId: text("history_id").notNull(),
+  watchSetAt: timestamp("watch_set_at"),
+  emailAddress: text("email_address"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
@@ -242,6 +262,18 @@ export const insertWorkoutPreferencesSchema = createInsertSchema(workoutPreferen
   updatedAt: true,
 });
 
+export const insertGmailTokenSchema = createInsertSchema(gmailTokens).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertGmailStateSchema = createInsertSchema(gmailState).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Update schemas
 export const updateItemSchema = insertItemSchema.partial();
 export const updateDayStateSchema = insertDayStateSchema.partial();
@@ -267,6 +299,10 @@ export type InsertWeeklySummary = z.infer<typeof insertWeeklySummarySchema>;
 export type WeeklySummary = typeof weeklySummary.$inferSelect;
 export type InsertWorkoutPreferences = z.infer<typeof insertWorkoutPreferencesSchema>;
 export type WorkoutPreferences = typeof workoutPreferences.$inferSelect;
+export type InsertGmailToken = z.infer<typeof insertGmailTokenSchema>;
+export type GmailToken = typeof gmailTokens.$inferSelect;
+export type InsertGmailState = z.infer<typeof insertGmailStateSchema>;
+export type GmailState = typeof gmailState.$inferSelect;
 
 // API schemas
 export const parsedIntentSchema = z.object({
