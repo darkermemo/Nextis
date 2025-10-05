@@ -8,6 +8,7 @@ import { WeeklyService } from "./services/weekly";
 import { templateService } from "./services/templates";
 import { healthService } from "./services/health";
 import { gymService } from "./services/gym";
+import { GmailService } from "./services/gmail";
 import { z } from "zod";
 import { parsedIntentSchema, type Item } from "@shared/schema";
 import dayjs from "dayjs";
@@ -22,6 +23,7 @@ const MOCK_USER_ID = "mock-user-id";
 
 // Initialize weekly service
 const weeklyService = new WeeklyService(storage);
+const gmailService = new GmailService(storage);
 
 async function buildEventContext(item: Item, userId: string, kind: string) {
   const today = dayjs().format('YYYY-MM-DD');
@@ -158,6 +160,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Template apply error:", error);
       res.status(500).json({ error: "Failed to apply template" });
+    }
+  });
+
+  // Get Gmail connection status
+  app.get("/api/gmail/status", async (req, res) => {
+    try {
+      const gmailState = await storage.getGmailState(MOCK_USER_ID);
+      
+      res.json({
+        connected: !!gmailState,
+        emailAddress: gmailState?.emailAddress || null,
+        lastSyncAt: gmailState?.updatedAt?.toISOString() || null,
+      });
+    } catch (error) {
+      console.error("Gmail status error:", error);
+      res.status(500).json({ error: "Failed to get Gmail status" });
+    }
+  });
+
+  // Manually trigger Gmail sync
+  app.post("/api/gmail/sync", async (req, res) => {
+    try {
+      const messageIds = await gmailService.syncUserGmail(MOCK_USER_ID);
+      
+      res.json({
+        success: true,
+        messageCount: messageIds.length,
+      });
+    } catch (error: any) {
+      console.error("Gmail sync error:", error);
+      
+      if (error.message === "Gmail not connected") {
+        return res.status(401).json({ success: false, error: "Gmail not connected" });
+      }
+      
+      res.status(500).json({ success: false, error: "Failed to sync Gmail" });
+    }
+  });
+
+  // Get Gmail connection info
+  app.get("/api/gmail/connection-info", async (req, res) => {
+    try {
+      const gmailState = await storage.getGmailState(MOCK_USER_ID);
+      
+      res.json({
+        connected: !!gmailState,
+        lastSync: gmailState?.updatedAt?.toISOString() || null,
+      });
+    } catch (error) {
+      console.error("Gmail connection info error:", error);
+      res.status(500).json({ error: "Failed to get Gmail connection info" });
     }
   });
 
