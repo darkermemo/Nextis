@@ -346,17 +346,24 @@ export class DatabaseStorage implements IStorage {
   async upsertWorkoutPreferences(prefs: InsertWorkoutPreferences & { userId: string }): Promise<WorkoutPreferences> {
     const existing = await this.getWorkoutPreferences(prefs.userId);
     
+    const payload = {
+      userId: prefs.userId,
+      perWeek: prefs.perWeek,
+      defaultDurationMin: prefs.defaultDurationMin,
+      preferredWindows: (prefs.preferredWindows ?? null) as string[] | null,
+    };
+    
     if (existing) {
       const [updated] = await db
         .update(workoutPreferences)
-        .set({ ...prefs, updatedAt: new Date() })
+        .set({ ...payload, updatedAt: new Date() })
         .where(eq(workoutPreferences.userId, prefs.userId))
         .returning();
       return updated;
     } else {
       const [created] = await db
         .insert(workoutPreferences)
-        .values(prefs)
+        .values(payload)
         .returning();
       return created;
     }
