@@ -182,11 +182,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Manually trigger Gmail sync
   app.post("/api/gmail/sync", async (req, res) => {
     try {
-      const messageIds = await gmailService.syncUserGmail(MOCK_USER_ID);
+      const { timezone = "Asia/Riyadh" } = req.body;
+      const result = await gmailService.syncUserGmail(MOCK_USER_ID, timezone);
       
       res.json({
         success: true,
-        messageCount: messageIds.length,
+        itemsCreated: result.itemsCreated,
+        categories: result.categories,
       });
     } catch (error: any) {
       console.error("Gmail sync error:", error);
