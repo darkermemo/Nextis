@@ -28,7 +28,12 @@ app.use(cors({
       allowedOrigins.push(`https://${process.env.REPLIT_DEV_DOMAIN}`);
     }
 
-    if (!origin || allowedOrigins.includes(origin) || origin?.includes('replit.dev') || origin?.includes('repl.co')) {
+    // Allow Railway domains
+    const isRailway = !!origin && (
+      origin.includes('railway.app') || origin.endsWith('.up.railway.app')
+    );
+
+    if (!origin || allowedOrigins.includes(origin) || origin?.includes('replit.dev') || origin?.includes('repl.co') || isRailway) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'), false);
