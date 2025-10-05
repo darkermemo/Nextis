@@ -145,14 +145,13 @@ INSTRUCTIONS:
       const asText = (r as any)?.output?.[0]?.content?.[0]?.text as string | undefined;
       let result = asText ? JSON.parse(asText) : {};
       
-      // Harden: if model downgraded kind, restore from pre-parse
-      if (hints.kind && result.kind === "genericTask" && /meeting|appointment|social|exam/.test(hints.category || hints.kind)) {
+      // Harden: if model downgraded kind, restore from pre-parse (always trust regex extraction)
+      if (hints.kind && hints.kind !== "addEvent" && result.kind === "genericTask") {
         result.kind = hints.kind;
-        result.category = hints.category;
       }
       
-      // Merge hints for missing fields
-      result = { ...hints, ...result };
+      // Merge hints for missing fields (preParse is authoritative for extracted values)
+      result = { ...hints, ...result, kind: hints.kind || result.kind };
       
       // Validate the response structure
       if (!result.kind) {

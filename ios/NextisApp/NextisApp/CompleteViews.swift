@@ -1437,7 +1437,7 @@ struct StatCard: View {
 extension APIClient {
 	func sendChatMessage(_ message: String) async throws -> ChatResponse {
 		struct Body: Encodable { let message: String; let timezone: String }
-		var url = config.baseURL.appendingPathComponent("/api/chat/parse")
+		let url = config.baseURL.appendingPathComponent("/api/chat/parse")
 		var req = URLRequest(url: url)
 		req.httpMethod = "POST"
 		req.setValue("application/json", forHTTPHeaderField: "Content-Type")

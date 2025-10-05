@@ -9,7 +9,7 @@ struct WeekMindRoot: View {
 	var body: some View {
 		VStack(spacing: 0) {
 			HeaderView()
-			if showMoodBanner && (dayState == nil || dayState?.mood == .none) { MoodCheckInBanner(client: client, onSet: { showMoodBanner = false; Task { await loadDayState() } }) }
+			if showMoodBanner && (dayState == nil || dayState?.mood == Mood.none) { MoodCheckInBanner(client: client, onSet: { showMoodBanner = false; Task { await loadDayState() } }) }
 			NotificationBannerView(client: client)
 			TabBar(activeTab: $activeTab)
 			TabContent(activeTab: activeTab, client: client)

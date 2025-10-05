@@ -95,6 +95,7 @@ public struct UserProfile: Codable, Identifiable {
 	public let allowEveningStudy: Bool
 	public let defaultTVStartHour: Int
 	public let autoBreaks: Bool
+	public let waterGoalMl: Int?
 	public let createdAt: String
 }
 
