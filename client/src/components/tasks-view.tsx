@@ -1,15 +1,22 @@
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useToast } from "../hooks/use-toast";
 import type { TasksResponse, Task } from "../types";
 import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
+import { PlanExplainer } from "./plan-explainer";
+import { MicroMoodCheckin } from "./micro-mood-checkin";
+import { Coffee } from "lucide-react";
 
 dayjs.extend(relativeTime);
 
 export function TasksView() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [explainerItemId, setExplainerItemId] = useState<string | null>(null);
+  const [explainerItemTitle, setExplainerItemTitle] = useState<string>("");
+  const [completedItem, setCompletedItem] = useState<{ id: string; title: string; type: string } | null>(null);
 
   const { data: tasks, isLoading } = useQuery<TasksResponse>({
     queryKey: ["/api/tasks"],
@@ -17,11 +24,20 @@ export function TasksView() {
   });
 
   const toggleMutation = useMutation({
-    mutationFn: ({ id, done }: { id: string; done: boolean }) => 
+    mutationFn: ({ id, done, task }: { id: string; done: boolean; task?: Task }) => 
       api.toggleTaskComplete(id, done),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/next"] });
+      
+      if (variables.done && variables.task) {
+        setCompletedItem({
+          id: variables.task.id,
+          title: variables.task.title,
+          type: variables.task.type,
+        });
+      }
+      
       toast({
         title: "Task updated",
         description: "Task completion status has been updated.",
@@ -75,15 +91,16 @@ export function TasksView() {
         <input 
           type="checkbox" 
           checked={task.done}
-          onChange={(e) => toggleMutation.mutate({ id: task.id, done: e.target.checked })}
+          onChange={(e) => toggleMutation.mutate({ id: task.id, done: e.target.checked, task })}
           disabled={toggleMutation.isPending}
           className="task-checkbox mt-0.5" 
           data-testid={`task-checkbox-${task.id}`}
         />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-2">
-            <h3 className={`text-sm font-semibold ${task.done ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
-              {task.title}
+            <h3 className={`text-sm font-semibold flex items-center gap-1.5 ${task.done ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
+              {task.type === "breakTime" && <Coffee className="w-4 h-4 shrink-0" />}
+              <span>{task.title}</span>
             </h3>
             <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(task.priority)}`}>
               {task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}
@@ -126,11 +143,28 @@ export function TasksView() {
             )}
           </div>
         </div>
-        <button className="p-2 hover:bg-muted rounded transition-colors" data-testid={`task-details-${task.id}`}>
-          <svg className="w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-1">
+          {task.start && (
+            <button 
+              className="p-2 hover:bg-muted rounded transition-colors" 
+              onClick={() => {
+                setExplainerItemId(task.id);
+                setExplainerItemTitle(task.title);
+              }}
+              data-testid={`button-why-here-${task.id}`}
+              title="Why is this scheduled here?"
+            >
+              <svg className="w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </button>
+          )}
+          <button className="p-2 hover:bg-muted rounded transition-colors" data-testid={`task-details-${task.id}`}>
+            <svg className="w-4 h-4 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -148,77 +182,102 @@ export function TasksView() {
   }
 
   return (
-    <div className="h-full overflow-y-auto px-4 py-6 sm:px-6">
-      <div className="max-w-4xl mx-auto space-y-6">
-        {/* Today Section */}
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-              <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Today
-            </h2>
-            <span className="text-sm text-muted-foreground">{tasks?.today.length || 0} tasks</span>
-          </div>
-          
-          <div className="space-y-3">
-            {tasks?.today.length ? (
-              tasks.today.map((task) => <TaskItem key={task.id} task={task} />)
-            ) : (
-              <div className="bg-card rounded-lg border border-border p-6 text-center text-muted-foreground">
-                No tasks scheduled for today. Great job staying on top of things!
-              </div>
-            )}
-          </div>
-        </section>
+    <>
+      {completedItem && (
+        <MicroMoodCheckin
+          itemId={completedItem.id}
+          itemTitle={completedItem.title}
+          itemType={completedItem.type}
+          onClose={() => setCompletedItem(null)}
+        />
+      )}
+      
+      <div className="h-full overflow-y-auto px-4 py-6 sm:px-6">
+        <div className="max-w-4xl mx-auto space-y-6">
+          {/* Today Section */}
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Today
+              </h2>
+              <span className="text-sm text-muted-foreground">{tasks?.today.length || 0} tasks</span>
+            </div>
+            
+            <div className="space-y-3">
+              {tasks?.today.length ? (
+                tasks.today.map((task) => <TaskItem key={task.id} task={task} />)
+              ) : (
+                <div className="bg-card rounded-lg border border-border p-6 text-center text-muted-foreground">
+                  No tasks scheduled for today. Great job staying on top of things!
+                </div>
+              )}
+            </div>
+          </section>
 
-        {/* This Week Section */}
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-              <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              This Week
-            </h2>
-            <span className="text-sm text-muted-foreground">{tasks?.thisWeek.length || 0} tasks</span>
-          </div>
-          
-          <div className="space-y-3">
-            {tasks?.thisWeek.length ? (
-              tasks.thisWeek.map((task) => <TaskItem key={task.id} task={task} />)
-            ) : (
-              <div className="bg-card rounded-lg border border-border p-6 text-center text-muted-foreground">
-                No tasks scheduled for this week. Add some tasks through the chat to get started!
-              </div>
-            )}
-          </div>
-        </section>
+          {/* This Week Section */}
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                This Week
+              </h2>
+              <span className="text-sm text-muted-foreground">{tasks?.thisWeek.length || 0} tasks</span>
+            </div>
+            
+            <div className="space-y-3">
+              {tasks?.thisWeek.length ? (
+                tasks.thisWeek.map((task) => <TaskItem key={task.id} task={task} />)
+              ) : (
+                <div className="bg-card rounded-lg border border-border p-6 text-center text-muted-foreground">
+                  No tasks scheduled for this week. Add some tasks through the chat to get started!
+                </div>
+              )}
+            </div>
+          </section>
 
-        {/* Later Section */}
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-              <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              Later
-            </h2>
-            <span className="text-sm text-muted-foreground">{tasks?.later.length || 0} tasks</span>
-          </div>
-          
-          <div className="space-y-3">
-            {tasks?.later.length ? (
-              tasks.later.map((task) => <TaskItem key={task.id} task={task} />)
-            ) : (
-              <div className="bg-card rounded-lg border border-border p-6 text-center text-muted-foreground">
-                No future tasks scheduled. Your calendar looks clear ahead!
-              </div>
-            )}
-          </div>
-        </section>
+          {/* Later Section */}
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Later
+              </h2>
+              <span className="text-sm text-muted-foreground">{tasks?.later.length || 0} tasks</span>
+            </div>
+            
+            <div className="space-y-3">
+              {tasks?.later.length ? (
+                tasks.later.map((task) => <TaskItem key={task.id} task={task} />)
+              ) : (
+                <div className="bg-card rounded-lg border border-border p-6 text-center text-muted-foreground">
+                  No future tasks scheduled. Your calendar looks clear ahead!
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
       </div>
-    </div>
+      
+      {explainerItemId && (
+        <PlanExplainer
+          itemId={explainerItemId}
+          itemTitle={explainerItemTitle}
+          open={explainerItemId !== null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setExplainerItemId(null);
+              setExplainerItemTitle("");
+            }
+          }}
+        />
+      )}
+    </>
   );
 }

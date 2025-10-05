@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useToast } from "../hooks/use-toast";
+import { TemplatePicker } from "./template-picker";
 import type { NextActions, ChatResponse } from "../types";
 import dayjs from "dayjs";
 
@@ -19,11 +20,12 @@ export function ChatView() {
     {
       id: "welcome",
       type: "assistant",
-      content: "👋 Hi! I'm WeekMind, your intelligent planning assistant. I can help you manage tasks, schedule events, and optimize your time.\n\nTry saying things like:\n• \"I have an exam on economics next Friday\"\n• \"Meeting Thursday at 9:00 pm\"\n• \"I have 3 homeworks next week\"\n• \"Add coffee breaks and TV time\"",
+      content: "👋 Hi! I'm WeekMind, your intelligent planning assistant. I can help you manage tasks, schedule events, and optimize your time.\n\nTry saying things like:\n• \"I have an exam on economics next Friday\"\n• \"Meeting Thursday at 9:00 pm\"\n• \"I have 3 homeworks next week\"\n• \"Add coffee breaks and TV time\"\n\nOr click Quick Add to use templates!",
       timestamp: new Date(),
     }
   ]);
   const [earlyWork, setEarlyWork] = useState(false);
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -271,6 +273,18 @@ export function ChatView() {
       {/* Chat Input Area */}
       <div className="border-t border-border bg-card px-3 py-3 sm:px-6 sm:py-4">
         <form onSubmit={handleSubmit} className="flex gap-2 sm:gap-3">
+          <button
+            type="button"
+            onClick={() => setShowTemplatePicker(true)}
+            className="px-3 py-3 bg-accent text-accent-foreground rounded-lg font-medium hover:bg-accent/80 transition-colors flex items-center justify-center gap-2 min-w-[44px] min-h-[44px]"
+            data-testid="quick-add-button"
+            title="Quick Add Templates"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+            </svg>
+            <span className="hidden sm:inline">Quick Add</span>
+          </button>
           <div className="flex-1 relative">
             <input 
               type="text" 
@@ -321,6 +335,8 @@ export function ChatView() {
           <span className="text-xs text-muted-foreground font-mono">Asia/Riyadh • {dayjs().format('MMM D, YYYY')}</span>
         </div>
       </div>
+
+      <TemplatePicker open={showTemplatePicker} onOpenChange={setShowTemplatePicker} />
     </div>
   );
 }

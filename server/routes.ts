@@ -4,6 +4,10 @@ import { storage } from "./storage";
 import { llmService } from "./services/openai";
 import { plannerEngine } from "./services/planner";
 import { learningService } from "./services/learning";
+import { WeeklyService } from "./services/weekly";
+import { templateService } from "./services/templates";
+import { healthService } from "./services/health";
+import { gymService } from "./services/gym";
 import { z } from "zod";
 import { parsedIntentSchema, type Item } from "@shared/schema";
 import dayjs from "dayjs";
@@ -15,6 +19,9 @@ dayjs.extend(timezone);
 
 // Mock user for MVP - in production, use proper auth
 const MOCK_USER_ID = "mock-user-id";
+
+// Initialize weekly service
+const weeklyService = new WeeklyService(storage);
 
 async function buildEventContext(item: Item, userId: string, kind: string) {
   const today = dayjs().format('YYYY-MM-DD');
@@ -68,6 +75,89 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Chat parse error:", error);
       res.status(500).json({ error: "Failed to process message" });
+    }
+  });
+
+  // Get available templates
+  app.get("/api/templates", async (req, res) => {
+    try {
+      const templates = templateService.getAvailableTemplates();
+      res.json({ templates });
+    } catch (error) {
+      console.error("Templates list error:", error);
+      res.status(500).json({ error: "Failed to get templates" });
+    }
+  });
+
+  // Apply a template
+  app.post("/api/templates/apply", async (req, res) => {
+    try {
+      const { template, params, timezone = "Asia/Riyadh" } = req.body;
+
+      if (!template || !params) {
+        return res.status(400).json({ error: "Template and params are required" });
+      }
+
+      let items: Item[] = [];
+      let message = "";
+
+      switch (template) {
+        case "exam":
+          if (!params.subject || !params.date) {
+            return res.status(400).json({ error: "Subject and date are required for exam template" });
+          }
+          items = await templateService.applyExamTemplate(mockUser.id, params, timezone);
+          message = `Created exam preparation plan for ${params.subject} with ${items.length} items`;
+          break;
+
+        case "presentation":
+          if (!params.topic || !params.date) {
+            return res.status(400).json({ error: "Topic and date are required for presentation template" });
+          }
+          items = await templateService.applyPresentationTemplate(mockUser.id, params, timezone);
+          message = `Created presentation plan for ${params.topic} with ${items.length} tasks`;
+          break;
+
+        case "homework":
+          if (!params.subject || !params.deadline) {
+            return res.status(400).json({ error: "Subject and deadline are required for homework template" });
+          }
+          items = await templateService.applyHomeworkTemplate(mockUser.id, params, timezone);
+          message = `Created homework assignment for ${params.subject}`;
+          break;
+
+        case "project":
+          if (!params.name || !params.deadline || !params.phases || !Array.isArray(params.phases)) {
+            return res.status(400).json({ error: "Name, deadline, and phases array are required for project template" });
+          }
+          items = await templateService.applyProjectTemplate(mockUser.id, params, timezone);
+          message = `Created project plan for ${params.name} with ${items.length} milestones`;
+          break;
+
+        case "reading":
+          if (!params.title || !params.pages || !params.deadline) {
+            return res.status(400).json({ error: "Title, pages, and deadline are required for reading template" });
+          }
+          items = await templateService.applyReadingTemplate(mockUser.id, params, timezone);
+          message = `Created reading plan for ${params.title} with ${items.length} sessions`;
+          break;
+
+        case "lab":
+          if (!params.subject || !params.labDate) {
+            return res.status(400).json({ error: "Subject and labDate are required for lab template" });
+          }
+          items = await templateService.applyLabTemplate(mockUser.id, params, timezone);
+          message = `Created lab plan for ${params.subject} with ${items.length} tasks`;
+          break;
+
+        default:
+          return res.status(400).json({ error: `Unknown template: ${template}` });
+      }
+
+      res.json({ items, message });
+    } catch (error) {
+      console.error("Template apply error:", error);
+      res.status(500).json({ error: "Failed to apply template" });
     }
   });
 
@@ -156,6 +246,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get plan explanation for an item
+  app.get("/api/plan/explain/:itemId", async (req, res) => {
+    try {
+      const { itemId } = req.params;
+      const timezone = (req.query.timezone as string) || "Asia/Riyadh";
+
+      const explanation = await plannerEngine.explainPlacement(mockUser.id, itemId, timezone);
+      res.json(explanation);
+    } catch (error: any) {
+      console.error("Plan explanation error:", error);
+      
+      if (error.message === "Item not found" || error.message === "Item has no scheduled time") {
+        return res.status(404).json({ error: error.message });
+      }
+      
+      res.status(500).json({ error: "Failed to get plan explanation" });
+    }
+  });
+
   // Update mood
   app.post("/api/mood", async (req, res) => {
     try {
@@ -179,6 +288,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Mood error:", error);
       res.status(500).json({ error: "Failed to update mood" });
+    }
+  });
+
+  // Micro-mood check-in after task completion
+  app.post("/api/mood/checkin", async (req, res) => {
+    try {
+      const { afterItemId, rating } = req.body;
+      
+      if (!rating || !["easy", "ok", "hard"].includes(rating)) {
+        return res.status(400).json({ error: "Invalid rating. Must be 'easy', 'ok', or 'hard'" });
+      }
+      
+      const item = await storage.getItem(afterItemId, mockUser.id);
+      if (!item) {
+        return res.status(404).json({ error: "Item not found" });
+      }
+      
+      const actualDuration = item.durationMinutes || 60;
+      const itemStart = item.start || new Date();
+      const weekday = dayjs(itemStart).format('ddd');
+      const hour = dayjs(itemStart).hour();
+      
+      const updatedDuration = await learningService.applyMicroMoodFeedback(
+        mockUser.id,
+        item.type,
+        rating as "easy" | "ok" | "hard",
+        { weekday, hour }
+      );
+      
+      await storage.logEvent({
+        userId: mockUser.id,
+        kind: 'item_rated',
+        itemId: afterItemId,
+        context: {
+          rating: rating as "easy" | "ok" | "hard",
+          itemType: item.type,
+          duration: actualDuration,
+          type: item.type,
+        },
+      });
+      
+      let message = "";
+      if (rating === "easy") {
+        message = `Great! Future ${item.type} tasks will be shorter (${Math.round(updatedDuration)} min).`;
+      } else if (rating === "hard") {
+        message = `Noted! Future ${item.type} tasks will be longer (${Math.round(updatedDuration)} min).`;
+      } else {
+        message = `Got it! ${item.type} duration stays at ${Math.round(updatedDuration)} min.`;
+      }
+      
+      res.json({ 
+        updatedDuration: Math.round(updatedDuration),
+        message 
+      });
+    } catch (error) {
+      console.error("Micro-mood check-in error:", error);
+      res.status(500).json({ error: "Failed to record mood check-in" });
     }
   });
 
@@ -327,6 +493,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Skip error:", error);
       res.status(500).json({ error: "Failed to skip task" });
+    }
+  });
+
+  // Get current user
+  app.get("/api/user", async (req, res) => {
+    try {
+      const user = await storage.getUser(mockUser.id);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      res.json(user);
+    } catch (error) {
+      console.error("Get user error:", error);
+      res.status(500).json({ error: "Failed to get user" });
     }
   });
 
@@ -532,6 +712,501 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Learning insights error:", error);
       res.status(500).json({ error: "Failed to get learning insights" });
+    }
+  });
+
+  // Manually trigger break insertion
+  app.post("/api/breaks/recompute", async (req, res) => {
+    try {
+      const { now } = req.body;
+      const currentTime = now ? new Date(now) : new Date();
+
+      const breaks = await plannerEngine.insertMicroBreaks(mockUser.id, currentTime);
+
+      res.json({
+        breaksAdded: breaks.length,
+        breaks: breaks.map(b => ({
+          id: b.id,
+          title: b.title,
+          start: b.start?.toISOString(),
+          end: b.end?.toISOString(),
+          notes: b.notes,
+        })),
+      });
+    } catch (error) {
+      console.error("Recompute breaks error:", error);
+      res.status(500).json({ error: "Failed to recompute breaks" });
+    }
+  });
+
+  // Toggle automatic break insertion
+  app.post("/api/breaks/auto-toggle", async (req, res) => {
+    try {
+      const { enabled } = req.body;
+
+      if (typeof enabled !== "boolean") {
+        return res.status(400).json({ error: "enabled must be a boolean" });
+      }
+
+      const updatedUser = await storage.updateUser(mockUser.id, {
+        autoBreaks: enabled,
+      });
+
+      if (!updatedUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      res.json({
+        autoBreaks: updatedUser.autoBreaks,
+      });
+    } catch (error) {
+      console.error("Auto-toggle breaks error:", error);
+      res.status(500).json({ error: "Failed to toggle auto breaks" });
+    }
+  });
+
+  // Set water goal
+  app.post("/api/hydration/goal", async (req, res) => {
+    try {
+      const { mlPerDay } = req.body;
+
+      if (!mlPerDay || typeof mlPerDay !== "number" || mlPerDay <= 0) {
+        return res.status(400).json({ error: "Valid mlPerDay is required" });
+      }
+
+      const updatedUser = await storage.updateUser(mockUser.id, {
+        waterGoalMl: mlPerDay,
+      });
+
+      if (!updatedUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      res.json({ waterGoalMl: updatedUser.waterGoalMl });
+    } catch (error) {
+      console.error("Set water goal error:", error);
+      res.status(500).json({ error: "Failed to set water goal" });
+    }
+  });
+
+  // Ingest health data
+  app.post("/api/health/ingest", async (req, res) => {
+    try {
+      const { waterMl, sedentaryMinutes, activeMinutes, sleepHours } = req.body;
+
+      await healthService.ingestHealthData(mockUser.id, {
+        waterMl,
+        sedentaryMinutes,
+        activeMinutes,
+        sleepHours,
+      });
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Ingest health data error:", error);
+      res.status(500).json({ error: "Failed to ingest health data" });
+    }
+  });
+
+  // Get pending notifications
+  app.get("/api/notifications", async (req, res) => {
+    try {
+      const timezone = (req.query.timezone as string) || "Asia/Riyadh";
+      const now = dayjs().tz(timezone).toDate();
+      
+      const notifications = await storage.getPendingNotifications(mockUser.id, now);
+      res.json({ notifications });
+    } catch (error) {
+      console.error("Get notifications error:", error);
+      res.status(500).json({ error: "Failed to get notifications" });
+    }
+  });
+
+  // Acknowledge notification with action
+  app.post("/api/notifications/ack", async (req, res) => {
+    try {
+      const { notificationId, action, timezone = "Asia/Riyadh" } = req.body;
+
+      if (!notificationId || !action) {
+        return res.status(400).json({ error: "notificationId and action are required" });
+      }
+
+      if (!["accept", "dismiss", "snooze"].includes(action)) {
+        return res.status(400).json({ error: "action must be 'accept', 'dismiss', or 'snooze'" });
+      }
+
+      const notification = await storage.getPendingNotifications(mockUser.id, new Date());
+      const targetNotification = notification.find(n => n.id === notificationId);
+
+      if (!targetNotification) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
+
+      const now = dayjs().tz(timezone);
+
+      if (action === "accept") {
+        // Apply the suggestion from payload
+        if (targetNotification.kind === "suggestStart" && targetNotification.payload.itemId) {
+          // Move the item to the suggested time slot
+          const item = await storage.getItem(targetNotification.payload.itemId, mockUser.id);
+          if (item && item.start) {
+            const newStart = now.toDate();
+            const newEnd = now.add(item.durationMinutes || 30, 'minutes').toDate();
+            
+            await storage.updateItem(targetNotification.payload.itemId, mockUser.id, {
+              start: newStart,
+              end: newEnd,
+            });
+
+            // Log the move event
+            await storage.logEvent({
+              userId: mockUser.id,
+              kind: 'item_moved',
+              itemId: targetNotification.payload.itemId,
+              context: {
+                startPlanned: item.start.toISOString(),
+                startActual: newStart.toISOString(),
+              },
+            });
+          }
+        } else if (targetNotification.kind === "rescheduleMiss" && targetNotification.payload.itemId) {
+          // Reschedule the missed item
+          const newStart = dayjs(targetNotification.payload.toSlot).tz(timezone).toDate();
+          const item = await storage.getItem(targetNotification.payload.itemId, mockUser.id);
+          if (item) {
+            const newEnd = dayjs(newStart).add(item.durationMinutes || 30, 'minutes').toDate();
+            
+            await storage.updateItem(targetNotification.payload.itemId, mockUser.id, {
+              start: newStart,
+              end: newEnd,
+            });
+
+            // Log the reschedule event
+            await storage.logEvent({
+              userId: mockUser.id,
+              kind: 'plan_autorescheduled',
+              itemId: targetNotification.payload.itemId,
+              context: {
+                startActual: newStart.toISOString(),
+              },
+            });
+          }
+        } else if (targetNotification.kind === "water") {
+          // Log water intake (500ml default)
+          await healthService.ingestHealthData(mockUser.id, { waterMl: 500 });
+        } else if (targetNotification.kind === "sitBreak") {
+          // Create a 5-minute walk break
+          const breakStart = now.toDate();
+          const breakEnd = now.add(5, 'minutes').toDate();
+          
+          await storage.createItem({
+            userId: mockUser.id,
+            type: 'breakTime',
+            title: '🚶 Quick Walk Break',
+            start: breakStart,
+            end: breakEnd,
+            durationMinutes: 5,
+            fixed: false,
+            priority: 'normal',
+          });
+        }
+
+        await storage.markNotificationSent(notificationId, now.toDate());
+        res.json({ success: true, message: "Notification accepted and applied" });
+      } else if (action === "snooze") {
+        // Update scheduled to now + 15 minutes
+        const snoozeUntil = now.add(15, 'minutes').toDate();
+        await storage.dismissNotification(notificationId);
+        
+        // Create a new notification with snoozed schedule
+        await storage.createNotification({
+          userId: mockUser.id,
+          kind: targetNotification.kind as any,
+          payload: targetNotification.payload,
+          scheduled: snoozeUntil,
+          sentAt: null,
+        });
+
+        res.json({ success: true, message: "Notification snoozed for 15 minutes" });
+      } else if (action === "dismiss") {
+        await storage.dismissNotification(notificationId);
+        res.json({ success: true, message: "Notification dismissed" });
+      }
+    } catch (error) {
+      console.error("Acknowledge notification error:", error);
+      res.status(500).json({ error: "Failed to acknowledge notification" });
+    }
+  });
+
+  // Manually trigger notification checks
+  app.post("/api/notifications/check", async (req, res) => {
+    try {
+      const { timezone = "Asia/Riyadh" } = req.body;
+      const now = dayjs().tz(timezone);
+      const createdNotifications = [];
+
+      // Check for missed blocks (items with end time < now and no item_done event)
+      const recentItems = await storage.getItems(mockUser.id, {
+        start: now.subtract(4, 'hours').toDate(),
+        end: now.toDate(),
+      });
+
+      for (const item of recentItems) {
+        if (!item.end || !item.start || item.done || item.type === "breakTime" || item.type === "leisure") {
+          continue;
+        }
+
+        const itemEnd = dayjs(item.end).tz(timezone);
+        if (itemEnd.isBefore(now)) {
+          // Check if there's an item_done event for this item
+          const events = await storage.getRecentEvents(mockUser.id, 1);
+          const hasDoneEvent = events.some(e => e.itemId === item.id && e.kind === 'item_done');
+
+          if (!hasDoneEvent) {
+            // This item was missed, propose reschedule
+            const proposal = await plannerEngine.proposeReschedule(mockUser.id, item.id, now.toDate(), timezone);
+            
+            if (proposal) {
+              // Check if we already have a notification for this item
+              const existingNotifications = await storage.getPendingNotifications(mockUser.id, now.toDate());
+              const alreadyNotified = existingNotifications.some(
+                n => n.payload.itemId === item.id && n.kind === 'rescheduleMiss'
+              );
+
+              if (!alreadyNotified) {
+                const notification = await storage.createNotification({
+                  userId: mockUser.id,
+                  kind: 'rescheduleMiss',
+                  payload: {
+                    itemId: proposal.itemId,
+                    toSlot: proposal.toSlot,
+                    message: proposal.message,
+                  },
+                  scheduled: now.toDate(),
+                  sentAt: null,
+                });
+                createdNotifications.push(notification);
+              }
+            }
+          }
+        }
+      }
+
+      // Check for free time opportunities
+      const earlierStartProposal = await plannerEngine.proposeEarlierStart(mockUser.id, now.toDate(), timezone);
+      
+      if (earlierStartProposal) {
+        // Check if we already have a notification for this
+        const existingNotifications = await storage.getPendingNotifications(mockUser.id, now.toDate());
+        const alreadyNotified = existingNotifications.some(
+          n => n.payload.itemId === earlierStartProposal.itemId && n.kind === 'suggestStart'
+        );
+
+        if (!alreadyNotified) {
+          const notification = await storage.createNotification({
+            userId: mockUser.id,
+            kind: 'suggestStart',
+            payload: {
+              itemId: earlierStartProposal.itemId,
+              fromSlot: earlierStartProposal.fromSlot,
+              toSlot: earlierStartProposal.toSlot,
+              message: earlierStartProposal.message,
+            },
+            scheduled: now.toDate(),
+            sentAt: null,
+          });
+          createdNotifications.push(notification);
+        }
+      }
+
+      const user = await storage.getUser(mockUser.id);
+      if (user && user.autoBreaks) {
+        await plannerEngine.insertMicroBreaks(mockUser.id, now.toDate());
+      }
+
+      const waterCheck = await healthService.checkWaterReminder(mockUser.id, now.toDate());
+      if (waterCheck.shouldRemind) {
+        const existingNotifications = await storage.getPendingNotifications(mockUser.id, now.toDate());
+        const alreadyNotified = existingNotifications.some(n => n.kind === 'water');
+
+        if (!alreadyNotified) {
+          const notification = await storage.createNotification({
+            userId: mockUser.id,
+            kind: 'water',
+            payload: {
+              message: waterCheck.message,
+            },
+            scheduled: now.toDate(),
+            sentAt: null,
+          });
+          createdNotifications.push(notification);
+        }
+      }
+
+      const sitBreakCheck = await healthService.checkSitBreakReminder(mockUser.id, now.toDate());
+      if (sitBreakCheck.shouldRemind) {
+        const existingNotifications = await storage.getPendingNotifications(mockUser.id, now.toDate());
+        const alreadyNotified = existingNotifications.some(n => n.kind === 'sitBreak');
+
+        if (!alreadyNotified) {
+          const notification = await storage.createNotification({
+            userId: mockUser.id,
+            kind: 'sitBreak',
+            payload: {
+              message: sitBreakCheck.message,
+            },
+            scheduled: now.toDate(),
+            sentAt: null,
+          });
+          createdNotifications.push(notification);
+        }
+      }
+
+      res.json({
+        success: true,
+        created: createdNotifications.length,
+        notifications: createdNotifications,
+      });
+    } catch (error) {
+      console.error("Check notifications error:", error);
+      res.status(500).json({ error: "Failed to check notifications" });
+    }
+  });
+
+  // Get weekly summary for specific week
+  app.get("/api/weekly/summary", async (req, res) => {
+    try {
+      const weekStartParam = req.query.weekStart as string | undefined;
+      const timezone = (req.query.timezone as string) || "Asia/Riyadh";
+      
+      // Default to last Monday if not provided
+      const weekStart = weekStartParam
+        ? dayjs(weekStartParam).tz(timezone).startOf('day').toDate()
+        : dayjs().tz(timezone).startOf('week').toDate();
+
+      const summary = await weeklyService.generateWeeklySummary(mockUser.id, weekStart);
+      
+      res.json(summary);
+    } catch (error) {
+      console.error("Get weekly summary error:", error);
+      res.status(500).json({ error: "Failed to get weekly summary" });
+    }
+  });
+
+  // Get recent weekly summaries
+  app.get("/api/weekly/recent", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 4;
+      
+      const summaries = await storage.getRecentWeeklySummaries(mockUser.id, limit);
+      
+      res.json(summaries);
+    } catch (error) {
+      console.error("Get recent summaries error:", error);
+      res.status(500).json({ error: "Failed to get recent summaries" });
+    }
+  });
+
+  // Manually trigger weekly summary generation
+  app.post("/api/weekly/generate", async (req, res) => {
+    try {
+      const { weekStart: weekStartParam, timezone: userTimezone } = req.body;
+      const timezone = userTimezone || "Asia/Riyadh";
+      
+      // Default to last Monday if not provided
+      const weekStart = weekStartParam
+        ? dayjs(weekStartParam).tz(timezone).startOf('day').toDate()
+        : dayjs().tz(timezone).startOf('week').toDate();
+
+      const summary = await weeklyService.generateWeeklySummary(mockUser.id, weekStart);
+      
+      // Optional: Update habit learning based on insights (future enhancement)
+      // This could analyze the notes and adjust learning preferences
+      
+      res.json({
+        success: true,
+        summary,
+      });
+    } catch (error) {
+      console.error("Generate weekly summary error:", error);
+      res.status(500).json({ error: "Failed to generate weekly summary" });
+    }
+  });
+
+  // Get workout preferences
+  app.get("/api/workout/prefs", async (req, res) => {
+    try {
+      const preferences = await storage.getWorkoutPreferences(mockUser.id);
+      res.json({ preferences });
+    } catch (error) {
+      console.error("Get workout preferences error:", error);
+      res.status(500).json({ error: "Failed to get workout preferences" });
+    }
+  });
+
+  // Set/update workout preferences
+  app.post("/api/workout/prefs", async (req, res) => {
+    try {
+      const { perWeek, defaultDurationMin, preferredWindows } = req.body;
+
+      if (typeof perWeek !== "number" || perWeek < 1 || perWeek > 7) {
+        return res.status(400).json({ error: "perWeek must be between 1 and 7" });
+      }
+
+      if (typeof defaultDurationMin !== "number" || defaultDurationMin < 15 || defaultDurationMin > 240) {
+        return res.status(400).json({ error: "defaultDurationMin must be between 15 and 240" });
+      }
+
+      if (preferredWindows && !Array.isArray(preferredWindows)) {
+        return res.status(400).json({ error: "preferredWindows must be an array" });
+      }
+
+      const preferences = await storage.upsertWorkoutPreferences({
+        userId: mockUser.id,
+        perWeek,
+        defaultDurationMin,
+        preferredWindows: preferredWindows || null,
+      });
+
+      res.json({ preferences });
+    } catch (error) {
+      console.error("Set workout preferences error:", error);
+      res.status(500).json({ error: "Failed to set workout preferences" });
+    }
+  });
+
+  // Plan workouts for a week
+  app.post("/api/workout/plan", async (req, res) => {
+    try {
+      const { weekStart: weekStartParam, timezone: userTimezone } = req.body;
+      const timezone = userTimezone || "Asia/Riyadh";
+
+      const weekStart = weekStartParam
+        ? dayjs(weekStartParam).tz(timezone).toDate()
+        : dayjs().tz(timezone).startOf('isoWeek').toDate();
+
+      const workouts = await gymService.planWeeklyWorkouts(mockUser.id, weekStart, timezone);
+      const streakStatus = await gymService.checkStreakStatus(mockUser.id, timezone);
+
+      res.json({
+        workouts,
+        streakProtected: streakStatus.protected,
+      });
+    } catch (error) {
+      console.error("Plan workouts error:", error);
+      res.status(500).json({ error: "Failed to plan workouts" });
+    }
+  });
+
+  // Get streak status
+  app.get("/api/workout/streak", async (req, res) => {
+    try {
+      const timezone = (req.query.timezone as string) || "Asia/Riyadh";
+      const streakStatus = await gymService.checkStreakStatus(mockUser.id, timezone);
+      res.json(streakStatus);
+    } catch (error) {
+      console.error("Get streak status error:", error);
+      res.status(500).json({ error: "Failed to get streak status" });
     }
   });
 

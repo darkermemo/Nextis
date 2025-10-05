@@ -94,3 +94,16 @@ export interface LearningInsights {
     avgSkips: number;
   };
 }
+
+export interface User {
+  id: string;
+  username: string;
+  timezone: string;
+  workStartHour: number;
+  workEndHour: number;
+  bedtimeHour: number;
+  allowEveningStudy: boolean;
+  defaultTVStartHour: number;
+  autoBreaks: boolean;
+  createdAt: string;
+}

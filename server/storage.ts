@@ -1,4 +1,4 @@
-import { users, items, dayStates, events, habitLearn, dailyRollup, type User, type InsertUser, type Item, type InsertItem, type UpdateItem, type DayState, type InsertDayState, type UpdateDayState, type Event, type InsertEvent, type HabitLearn, type DailyRollup } from "@shared/schema";
+import { users, items, dayStates, events, habitLearn, dailyRollup, notifications, weeklySummary, workoutPreferences, type User, type InsertUser, type Item, type InsertItem, type UpdateItem, type DayState, type InsertDayState, type UpdateDayState, type Event, type InsertEvent, type HabitLearn, type DailyRollup, type Notification, type InsertNotification, type WeeklySummary, type InsertWeeklySummary, type WorkoutPreferences, type InsertWorkoutPreferences } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, asc, gte, lte, sql } from "drizzle-orm";
 
@@ -7,6 +7,7 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  updateUser(id: string, updates: Partial<User>): Promise<User | undefined>;
 
   // Item methods
   getItems(userId: string, options?: { start?: Date; end?: Date; type?: string }): Promise<Item[]>;
@@ -46,7 +47,23 @@ export interface IStorage {
     sleepHours?: number;
     waterMl?: number;
     activeMinutes?: number;
+    sedentaryMinutes?: number;
   }): Promise<DailyRollup>;
+
+  // Notification methods
+  createNotification(notification: InsertNotification): Promise<Notification>;
+  getPendingNotifications(userId: string, now: Date): Promise<Notification[]>;
+  markNotificationSent(id: string, sentAt: Date): Promise<void>;
+  dismissNotification(id: string): Promise<void>;
+
+  // Weekly summary methods
+  getWeeklySummary(userId: string, weekStart: string): Promise<WeeklySummary | null>;
+  createWeeklySummary(summary: InsertWeeklySummary): Promise<WeeklySummary>;
+  getRecentWeeklySummaries(userId: string, limit: number): Promise<WeeklySummary[]>;
+
+  // Workout preferences methods
+  getWorkoutPreferences(userId: string): Promise<WorkoutPreferences | null>;
+  upsertWorkoutPreferences(prefs: InsertWorkoutPreferences & { userId: string }): Promise<WorkoutPreferences>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -68,6 +85,15 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
+  async updateUser(id: string, updates: Partial<User>): Promise<User | undefined> {
+    const [updatedUser] = await db
+      .update(users)
+      .set(updates)
+      .where(eq(users.id, id))
+      .returning();
+    return updatedUser || undefined;
+  }
+
   async getItems(userId: string, options: { start?: Date; end?: Date; type?: string } = {}): Promise<Item[]> {
     const conditions = [eq(items.userId, userId)];
 
@@ -80,7 +106,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     if (options.type) {
-      conditions.push(eq(items.type, options.type));
+      conditions.push(eq(items.type, options.type as any));
     }
 
     const whereClause = conditions.length === 1 ? conditions[0] : and(...conditions);
@@ -152,7 +178,7 @@ export class DatabaseStorage implements IStorage {
   async logEvent(event: InsertEvent): Promise<Event> {
     const [newEvent] = await db
       .insert(events)
-      .values(event)
+      .values(event as any)
       .returning();
     return newEvent;
   }
@@ -224,6 +250,7 @@ export class DatabaseStorage implements IStorage {
     sleepHours?: number;
     waterMl?: number;
     activeMinutes?: number;
+    sedentaryMinutes?: number;
   }): Promise<DailyRollup> {
     const existing = await this.getDailyRollup(data.userId, data.date);
     
@@ -238,6 +265,90 @@ export class DatabaseStorage implements IStorage {
       const [created] = await db
         .insert(dailyRollup)
         .values(data)
+        .returning();
+      return created;
+    }
+  }
+
+  async createNotification(notification: InsertNotification): Promise<Notification> {
+    const [newNotification] = await db
+      .insert(notifications)
+      .values(notification as any)
+      .returning();
+    return newNotification;
+  }
+
+  async getPendingNotifications(userId: string, now: Date): Promise<Notification[]> {
+    return db
+      .select()
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.userId, userId),
+          sql`${notifications.sentAt} IS NULL`,
+          lte(notifications.scheduled, now)
+        )
+      )
+      .orderBy(asc(notifications.scheduled));
+  }
+
+  async markNotificationSent(id: string, sentAt: Date): Promise<void> {
+    await db
+      .update(notifications)
+      .set({ sentAt })
+      .where(eq(notifications.id, id));
+  }
+
+  async dismissNotification(id: string): Promise<void> {
+    await db
+      .update(notifications)
+      .set({ sentAt: new Date() })
+      .where(eq(notifications.id, id));
+  }
+
+  async getWeeklySummary(userId: string, weekStart: string): Promise<WeeklySummary | null> {
+    const [summary] = await db.select().from(weeklySummary).where(
+      and(eq(weeklySummary.userId, userId), eq(weeklySummary.weekStart, weekStart))
+    );
+    return summary || null;
+  }
+
+  async createWeeklySummary(summary: InsertWeeklySummary): Promise<WeeklySummary> {
+    const [newSummary] = await db
+      .insert(weeklySummary)
+      .values(summary as any)
+      .returning();
+    return newSummary;
+  }
+
+  async getRecentWeeklySummaries(userId: string, limit: number): Promise<WeeklySummary[]> {
+    return db
+      .select()
+      .from(weeklySummary)
+      .where(eq(weeklySummary.userId, userId))
+      .orderBy(desc(weeklySummary.weekStart))
+      .limit(limit);
+  }
+
+  async getWorkoutPreferences(userId: string): Promise<WorkoutPreferences | null> {
+    const [prefs] = await db.select().from(workoutPreferences).where(eq(workoutPreferences.userId, userId));
+    return prefs || null;
+  }
+
+  async upsertWorkoutPreferences(prefs: InsertWorkoutPreferences & { userId: string }): Promise<WorkoutPreferences> {
+    const existing = await this.getWorkoutPreferences(prefs.userId);
+    
+    if (existing) {
+      const [updated] = await db
+        .update(workoutPreferences)
+        .set({ ...prefs, updatedAt: new Date() })
+        .where(eq(workoutPreferences.userId, prefs.userId))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db
+        .insert(workoutPreferences)
+        .values(prefs)
         .returning();
       return created;
     }

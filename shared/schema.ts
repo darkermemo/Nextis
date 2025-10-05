@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer, boolean, jsonb, uuid, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, integer, boolean, jsonb, uuid, index, uniqueIndex, real } from "drizzle-orm/pg-core";
 import { desc } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -14,6 +14,8 @@ export const users = pgTable("users", {
   bedtimeHour: integer("bedtime_hour").notNull().default(22),
   allowEveningStudy: boolean("allow_evening_study").notNull().default(true),
   defaultTVStartHour: integer("default_tv_start_hour").notNull().default(22),
+  autoBreaks: boolean("auto_breaks").notNull().default(true),
+  waterGoalMl: integer("water_goal_ml"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 });
 
@@ -28,7 +30,16 @@ export const eventKindEnum = z.enum([
   "item_moved",
   "plan_autorescheduled",
   "bedtime_hit",
-  "health_ingested"
+  "health_ingested",
+  "item_rated"
+]);
+
+export const notificationKindEnum = z.enum([
+  "suggestStart",
+  "rescheduleMiss",
+  "sitBreak",
+  "water",
+  "bedtime"
 ]);
 
 export const items = pgTable("items", {
@@ -78,6 +89,12 @@ export const events = pgTable("events", {
     sleepHours?: number;
     dayOfWeek?: string;
     hourOfDay?: number;
+    rating?: "easy" | "ok" | "hard";
+    itemType?: string;
+    duration?: number;
+    waterMl?: number;
+    sedentaryMinutes?: number;
+    activeMinutes?: number;
   }>().notNull().default({}),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 }, (table) => ({
@@ -118,10 +135,54 @@ export const dailyRollup = pgTable("daily_rollup", {
   sleepHours: integer("sleep_hours"),
   waterMl: integer("water_ml"),
   activeMinutes: integer("active_minutes"),
+  sedentaryMinutes: integer("sedentary_minutes"),
   createdAt: timestamp("created_at").notNull().default(sql`now()`),
 }, (table) => ({
   userIdDateUnique: uniqueIndex("daily_rollup_user_id_date_unique").on(table.userId, table.date),
 }));
+
+export const notifications = pgTable("notifications", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind").$type<z.infer<typeof notificationKindEnum>>().notNull(),
+  payload: jsonb("payload").$type<{
+    itemId?: string;
+    fromSlot?: string;
+    toSlot?: string;
+    message?: string;
+  }>().notNull().default({}),
+  scheduled: timestamp("scheduled").notNull(),
+  sentAt: timestamp("sent_at"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (table) => ({
+  userIdSentAtIdx: index("notifications_user_id_sent_at_idx").on(table.userId, table.sentAt),
+}));
+
+export const weeklySummary = pgTable("weekly_summary", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  weekStart: text("week_start").notNull(), // YYYY-MM-DD format (Monday)
+  tasksDone: integer("tasks_done").notNull().default(0),
+  tasksSkipped: integer("tasks_skipped").notNull().default(0),
+  snoozes: integer("snoozes").notNull().default(0),
+  avgStartDelayMin: integer("avg_start_delay_min"),
+  sleepMedianH: real("sleep_median_h"),
+  activeMin: integer("active_min"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+}, (table) => ({
+  userIdWeekStartIdx: index("weekly_summary_user_id_week_start_idx").on(table.userId, table.weekStart),
+}));
+
+export const workoutPreferences = pgTable("workout_preferences", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }).unique(),
+  perWeek: integer("per_week").notNull().default(3),
+  defaultDurationMin: integer("default_duration_min").notNull().default(60),
+  preferredWindows: jsonb("preferred_windows").$type<string[]>(),
+  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+});
 
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).omit({
@@ -163,6 +224,24 @@ export const insertDailyRollupSchema = createInsertSchema(dailyRollup).omit({
   createdAt: true,
 });
 
+export const insertNotificationSchema = createInsertSchema(notifications).omit({
+  id: true,
+  createdAt: true,
+}).extend({
+  kind: notificationKindEnum,
+});
+
+export const insertWeeklySummarySchema = createInsertSchema(weeklySummary).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertWorkoutPreferencesSchema = createInsertSchema(workoutPreferences).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Update schemas
 export const updateItemSchema = insertItemSchema.partial();
 export const updateDayStateSchema = insertDayStateSchema.partial();
@@ -182,6 +261,12 @@ export type InsertHabitLearn = z.infer<typeof insertHabitLearnSchema>;
 export type HabitLearn = typeof habitLearn.$inferSelect;
 export type InsertDailyRollup = z.infer<typeof insertDailyRollupSchema>;
 export type DailyRollup = typeof dailyRollup.$inferSelect;
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type Notification = typeof notifications.$inferSelect;
+export type InsertWeeklySummary = z.infer<typeof insertWeeklySummarySchema>;
+export type WeeklySummary = typeof weeklySummary.$inferSelect;
+export type InsertWorkoutPreferences = z.infer<typeof insertWorkoutPreferencesSchema>;
+export type WorkoutPreferences = typeof workoutPreferences.$inferSelect;
 
 // API schemas
 export const parsedIntentSchema = z.object({

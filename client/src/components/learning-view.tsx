@@ -18,8 +18,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "./ui/alert-dialog";
-import { Brain, TrendingUp, Clock, BarChart3, RefreshCw, RotateCcw } from "lucide-react";
-import type { LearningPreferencesResponse, LearningInsights } from "../types";
+import { Brain, TrendingUp, Clock, BarChart3, RefreshCw, RotateCcw, Coffee } from "lucide-react";
+import type { LearningPreferencesResponse, LearningInsights, User } from "../types";
+import { HealthTracker } from "./health-tracker";
+import { GymPlanner } from "./gym-planner";
 
 const WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -28,9 +30,14 @@ export function LearningView() {
   const [showResetDialog, setShowResetDialog] = useState(false);
   const [localPreferEvening, setLocalPreferEvening] = useState<boolean>(false);
   const [localMaxFocus, setLocalMaxFocus] = useState<number>(60);
+  const [localAutoBreaks, setLocalAutoBreaks] = useState<boolean>(true);
 
   const { data: preferencesData, isLoading: prefsLoading } = useQuery<LearningPreferencesResponse>({
     queryKey: ["/api/learning/preferences"],
+  });
+
+  const { data: userData } = useQuery<User>({
+    queryKey: ["/api/user"],
   });
 
   useEffect(() => {
@@ -39,6 +46,12 @@ export function LearningView() {
       setLocalMaxFocus(preferencesData.preferences.maxContinuousFocus ?? 60);
     }
   }, [preferencesData]);
+
+  useEffect(() => {
+    if (userData) {
+      setLocalAutoBreaks(userData.autoBreaks ?? true);
+    }
+  }, [userData]);
 
   const { data: insights, isLoading: insightsLoading } = useQuery<LearningInsights>({
     queryKey: ["/api/learning/insights"],
@@ -111,6 +124,49 @@ export function LearningView() {
     },
   });
 
+  const toggleAutoBreaksMutation = useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const res = await apiRequest("POST", "/api/breaks/auto-toggle", { enabled });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/user"] });
+      toast({
+        title: "Auto Breaks updated",
+        description: localAutoBreaks ? "Automatic break insertion enabled." : "Automatic break insertion disabled.",
+      });
+    },
+    onError: () => {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to toggle auto breaks. Please try again.",
+      });
+    },
+  });
+
+  const recomputeBreaksMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/breaks/recompute", {});
+      return res.json();
+    },
+    onSuccess: (data: { breaksAdded: number }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/calendar"] });
+      toast({
+        title: "Breaks recomputed",
+        description: `Added ${data.breaksAdded} micro-break${data.breaksAdded !== 1 ? 's' : ''} to your schedule.`,
+      });
+    },
+    onError: () => {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to recompute breaks. Please try again.",
+      });
+    },
+  });
+
   const handlePreferEveningToggle = (checked: boolean) => {
     setLocalPreferEvening(checked);
     updatePrefsMutation.mutate({ preferEvening: checked });
@@ -122,6 +178,11 @@ export function LearningView() {
 
   const handleMaxFocusCommit = (value: number[]) => {
     updatePrefsMutation.mutate({ maxContinuousFocus: value[0] });
+  };
+
+  const handleAutoBreaksToggle = (checked: boolean) => {
+    setLocalAutoBreaks(checked);
+    toggleAutoBreaksMutation.mutate(checked);
   };
 
   const formatHour = (hour: number) => {
@@ -410,8 +471,56 @@ export function LearningView() {
               <span>120 min</span>
             </div>
           </div>
+
+          {/* Auto Breaks Toggle */}
+          <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50 border border-border">
+            <div className="flex-1">
+              <label htmlFor="auto-breaks" className="text-sm font-medium text-foreground cursor-pointer">
+                Automatic Micro-Breaks
+              </label>
+              <p className="text-xs text-muted-foreground mt-1">
+                Automatically insert 5-10 minute breaks before heavy tasks and near bedtime
+              </p>
+            </div>
+            <Switch
+              id="auto-breaks"
+              checked={localAutoBreaks}
+              onCheckedChange={handleAutoBreaksToggle}
+              disabled={toggleAutoBreaksMutation.isPending}
+              data-testid="toggle-auto-breaks"
+            />
+          </div>
+
+          {/* Recompute Breaks Button */}
+          <div className="p-4 rounded-lg bg-muted/50 border border-border">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex-1">
+                <h4 className="text-sm font-medium text-foreground">Break Optimizer</h4>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Manually recalculate and insert optimal breaks into your schedule
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => recomputeBreaksMutation.mutate()}
+              disabled={recomputeBreaksMutation.isPending}
+              className="w-full mt-2"
+              data-testid="button-recompute-breaks"
+            >
+              <Coffee className={`w-4 h-4 mr-2 ${recomputeBreaksMutation.isPending ? "animate-pulse" : ""}`} />
+              {recomputeBreaksMutation.isPending ? "Recomputing..." : "Recompute Breaks"}
+            </Button>
+          </div>
         </div>
       </Card>
+
+      {/* Health Tracker */}
+      <HealthTracker />
+
+      {/* Gym Planner */}
+      <GymPlanner />
 
       {/* Reset Confirmation Dialog */}
       <AlertDialog open={showResetDialog} onOpenChange={setShowResetDialog}>

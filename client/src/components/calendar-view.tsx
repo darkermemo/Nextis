@@ -4,11 +4,15 @@ import { api } from "../lib/api";
 import type { CalendarResponse } from "../types";
 import dayjs from "dayjs";
 import weekOfYear from "dayjs/plugin/weekOfYear";
+import { PlanExplainer } from "./plan-explainer";
+import { Coffee } from "lucide-react";
 
 dayjs.extend(weekOfYear);
 
 export function CalendarView() {
   const [currentWeek, setCurrentWeek] = useState(dayjs().startOf('week'));
+  const [explainerItemId, setExplainerItemId] = useState<string | null>(null);
+  const [explainerItemTitle, setExplainerItemTitle] = useState<string>("");
 
   const { data: calendarData, isLoading } = useQuery<CalendarResponse>({
     queryKey: ["/api/calendar", currentWeek.toISOString()],
@@ -100,10 +104,11 @@ export function CalendarView() {
   const timeSlots = generateTimeSlots();
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="p-4 sm:p-6">
-        {/* Calendar Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 sm:mb-6">
+    <>
+      <div className="h-full overflow-y-auto">
+        <div className="p-4 sm:p-6">
+          {/* Calendar Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 sm:mb-6">
           <div>
             <h2 className="text-xl sm:text-2xl font-bold text-foreground">
               {currentWeek.format('MMMM YYYY')}
@@ -183,16 +188,41 @@ export function CalendarView() {
                         return (
                           <div
                             key={item.id}
-                            className={`calendar-event ${getTypeColor(item.type)}`}
+                            className={`calendar-event ${getTypeColor(item.type)} group cursor-pointer relative`}
                             style={{ 
                               top: `${position.top}px`, 
                               height: `${position.height}px` 
                             }}
                             data-testid={`calendar-event-${item.id}`}
+                            onClick={() => {
+                              setExplainerItemId(item.id);
+                              setExplainerItemTitle(item.title);
+                            }}
                           >
-                            <div className="font-semibold truncate">{item.title}</div>
-                            <div className="text-xs opacity-75">
-                              {dayjs(item.start).format('HH:mm')} - {dayjs(item.end).format('HH:mm')}
+                            <div className="flex items-start justify-between gap-1">
+                              <div className="flex-1 min-w-0">
+                                <div className="font-semibold truncate flex items-center gap-1.5">
+                                  {item.type === "breakTime" && <Coffee className="w-4 h-4 shrink-0" />}
+                                  <span>{item.title}</span>
+                                </div>
+                                <div className="text-xs opacity-75">
+                                  {dayjs(item.start).format('HH:mm')} - {dayjs(item.end).format('HH:mm')}
+                                </div>
+                              </div>
+                              <button
+                                className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-black/10 rounded"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExplainerItemId(item.id);
+                                  setExplainerItemTitle(item.title);
+                                }}
+                                data-testid={`calendar-button-why-here-${item.id}`}
+                                title="Why is this scheduled here?"
+                              >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                              </button>
                             </div>
                           </div>
                         );
@@ -230,5 +260,20 @@ export function CalendarView() {
         </div>
       </div>
     </div>
+    
+    {explainerItemId && (
+      <PlanExplainer
+        itemId={explainerItemId}
+        itemTitle={explainerItemTitle}
+        open={explainerItemId !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setExplainerItemId(null);
+            setExplainerItemTitle("");
+          }
+        }}
+      />
+    )}
+  </>
   );
 }

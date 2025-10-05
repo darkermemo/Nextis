@@ -13,6 +13,8 @@ export class LearningService {
   private readonly ALPHA = 0.8;
   private readonly MIN_DURATION = 30;
   private readonly MAX_DURATION = 90;
+  private readonly MICRO_MOOD_MIN_DURATION = 15;
+  private readonly MICRO_MOOD_MAX_DURATION = 120;
 
   constructor(storage: IStorage) {
     this.storage = storage;
@@ -239,6 +241,54 @@ export class LearningService {
       penalties,
       preferences,
     });
+  }
+
+  async applyMicroMoodFeedback(
+    userId: string,
+    itemType: string,
+    rating: "easy" | "ok" | "hard",
+    slot: { weekday: string; hour: number }
+  ): Promise<number> {
+    let learn = await this.storage.getHabitLearn(userId);
+    if (!learn) {
+      learn = await this.initializeHabitLearn(userId);
+    }
+
+    const updatedLengthJSON = { ...learn.lengthJSON };
+    const currentDuration = updatedLengthJSON[itemType] || 60;
+    
+    let newDuration = currentDuration;
+    if (rating === 'easy') {
+      newDuration = currentDuration * 0.9;
+    } else if (rating === 'hard') {
+      newDuration = currentDuration * 1.1;
+    }
+    
+    updatedLengthJSON[itemType] = Math.max(
+      this.MICRO_MOOD_MIN_DURATION,
+      Math.min(this.MICRO_MOOD_MAX_DURATION, newDuration)
+    );
+
+    const updatedWindowJSON = { ...learn.windowJSON };
+    const weekdayKey = slot.weekday as keyof typeof learn.windowJSON;
+    const currentWindowScores = updatedWindowJSON[weekdayKey] || Array(24).fill(0.5);
+    const newWindowScores = [...currentWindowScores];
+    
+    if (rating === 'easy') {
+      newWindowScores[slot.hour] = Math.min(1.0, (newWindowScores[slot.hour] || 0.5) + 0.05);
+    } else if (rating === 'hard') {
+      newWindowScores[slot.hour] = Math.max(0.0, (newWindowScores[slot.hour] || 0.5) - 0.05);
+    }
+    
+    updatedWindowJSON[weekdayKey] = newWindowScores;
+
+    await this.storage.upsertHabitLearn({
+      userId,
+      windowJSON: updatedWindowJSON,
+      lengthJSON: updatedLengthJSON,
+    });
+
+    return updatedLengthJSON[itemType];
   }
 }
 
