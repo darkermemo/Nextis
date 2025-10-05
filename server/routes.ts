@@ -16,6 +16,7 @@ import utc from "dayjs/plugin/utc.js";
 import timezone from "dayjs/plugin/timezone.js";
 import OpenAI from "openai";
 import { IntentJsonSchema } from "./services/openai";
+import { client as agentClient, tools as agentTools, COORDINATOR_PROMPT, dispatchTool } from "./services/agent";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -1348,6 +1349,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) {
       console.error("/api/realtime/session error:", err?.message || err);
       res.status(500).json({ error: "failed_to_create_session" });
+    }
+  });
+
+  // Agent text endpoint: model chooses tools; we execute, then summarize
+  app.post("/api/agent/respond", async (req, res) => {
+    try {
+      const { userId = MOCK_USER_ID, timezone = process.env.TZ || "Asia/Riyadh", message } = req.body || {};
+      if (!message) return res.status(400).json({ error: "message_required" });
+
+      const model = process.env.OPENAI_MODEL || "gpt-5";
+      const resp = await agentClient.responses.create({
+        model,
+        input: [
+          { role: "system", content: COORDINATOR_PROMPT },
+          { role: "user", content: message },
+        ],
+        tools: agentTools as any,
+        tool_choice: "auto",
+      });
+
+      const toolOutputs: any[] = [];
+      for (const block of ((resp as any).output ?? [])) {
+        for (const c of (block?.content ?? [])) {
+          if (c.type === "tool_call") {
+            const args = JSON.parse(c.arguments || "{}");
+            if (!args.userId) args.userId = userId;
+            if (!args.timezone) args.timezone = timezone;
+            const out = await dispatchTool(c.name, args);
+            toolOutputs.push({ id: c.id, name: c.name, output: out });
+          }
+        }
+      }
+
+      let summary = "";
+      if (toolOutputs.length) {
+        const s = await agentClient.responses.create({
+          model,
+          input: [
+            { role: "system", content: "Summarize the changes in \u22642 sentences, actionable and specific." },
+            { role: "user", content: JSON.stringify(toolOutputs) },
+          ],
+        });
+        summary = (s as any)?.output?.[0]?.content?.[0]?.text ?? "";
+      }
+
+      res.json({ tools: toolOutputs, summary });
+    } catch (err: any) {
+      console.error("/api/agent/respond error:", err?.message || err);
+      res.status(500).json({ error: "failed_to_respond" });
     }
   });
 
