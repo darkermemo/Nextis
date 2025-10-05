@@ -545,19 +545,24 @@ export class PlannerEngine {
   private async createExamPlan(intent: ParsedIntent, user: User, timezone: string): Promise<Item[]> {
     const items: Item[] = [];
     const examDate = intent.date ? dayjs(intent.date).tz(timezone) : dayjs().tz(timezone).add(7, 'days');
+    const examDuration = intent.durationMinutes ?? 120;
+    const examStart = intent.time
+      ? dayjs(`${examDate.format('YYYY-MM-DD')} ${intent.time}`).tz(timezone)
+      : examDate.hour(10).minute(0);
+    const examEnd = examStart.add(examDuration, 'minutes');
     
     // Create exam event
     const exam = await storage.createItem({
       userId: user.id,
       type: "event",
       title: intent.title || "Exam",
-      start: examDate.hour(10).minute(0).toDate(), // Default 10 AM
-      end: examDate.hour(12).minute(0).toDate(),
+      start: examStart.toDate(),
+      end: examEnd.toDate(),
       fixed: true,
       priority: "high",
       reminders: [
-        examDate.subtract(2, 'days').hour(9).minute(0).toISOString(), // D-2
-        examDate.subtract(5, 'hours').toISOString(), // T-5h
+        examStart.subtract(2, 'days').hour(9).minute(0).toISOString(), // D-2
+        examStart.subtract(5, 'hours').toISOString(), // T-5h
       ],
     });
     items.push(exam);
