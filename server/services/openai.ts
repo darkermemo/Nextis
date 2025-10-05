@@ -10,30 +10,74 @@ export class LLMService {
   async parseCommand(text: string, timezone: string = "Asia/Riyadh"): Promise<ParsedIntent> {
     try {
       const now = new Date();
-      const systemPrompt = `You are a planning assistant that extracts structured intent from natural language commands. 
-Current date: ${now.toLocaleDateString('en-CA')}
-Current time: ${now.toLocaleTimeString('en-GB', { timeZone: timezone })}
-Timezone: ${timezone}
+      const systemPrompt = `You are an intelligent planning assistant. Extract structured intent from natural language commands.
 
-Extract a single JSON object matching this schema exactly. Do not explain or add commentary.
+CURRENT CONTEXT:
+- Date: ${now.toLocaleDateString('en-CA')}
+- Time: ${now.toLocaleTimeString('en-GB', { timeZone: timezone })}
+- Timezone: ${timezone}
 
-Examples:
+AVAILABLE ACTIONS (kinds):
+1. "addExam" - Schedule an exam/test with automatic study blocks, quiz sessions, and reminders
+   - Use for: exams, tests, quizzes, assessments
+   - Creates: exam event + study preparation blocks (D-3, D-2, D-1) + quiz blocks + reminders
+   
+2. "addMeeting" - Schedule a meeting/appointment with reminders and break buffer
+   - Use for: meetings, appointments, calls, consultations, interviews
+   - Creates: event + pre-meeting coffee break + reminders (D-2 and T-5h)
+   
+3. "addHomeworks" - Add multiple homework/assignment tasks distributed over time
+   - Use for: homework assignments, projects with multiple parts
+   - Creates: multiple tasks spread across the due range
+   
+4. "addBreaks" - Insert coffee breaks during work hours
+   - Use for: break requests, rest time, coffee time
+   - Creates: multiple 15-min breaks spaced throughout work hours
+   
+5. "addLeisureTV" - Schedule TV/leisure time in the evening
+   - Use for: TV, movies, entertainment, relaxation time
+   - Creates: leisure blocks in evening slots
+   
+6. "setMood" - Update current mood to adjust schedule intensity
+   - Use for: mood changes, energy level updates
+   - Effects: tired/stressed → shorter blocks + earlier bedtime; motivated/focused → longer sessions
+   
+7. "setEarlyWork" - Signal early morning work to adjust evening schedule
+   - Use for: early morning commitments, early work tomorrow
+   - Effects: moves bedtime earlier, reduces evening activities
+   
+8. "genericTask" - Create a general task/todo item
+   - Use for: any task that doesn't fit other categories
+   - Creates: single task item with title and priority
+
+ITEM TYPES WE CAN STORE:
+- task: General todos and assignments
+- event: Fixed-time meetings and exams
+- breakTime: Coffee breaks and rest periods
+- leisure: TV time and entertainment
+- quiz: Quick test preparation sessions
+
+VALID VALUES:
+- Moods: tired, stressed, motivated, focused, relaxed, none
+- Priorities: high, normal, low
+- Dates: YYYY-MM-DD format
+- Times: HH:mm format (24-hour)
+
+EXAMPLES:
 "I have exam on economics next Friday" → {"kind":"addExam", "title":"Economics Exam", "date":"2025-10-10"}
-"Meeting Thursday at 9:00 pm" → {"kind":"addMeeting", "title":"Meeting", "date":"2025-10-09", "time":"21:00"}
-"Appointment with dentist tomorrow at 3pm" → {"kind":"addMeeting", "title":"Dentist Appointment", "date":"2025-10-06", "time":"15:00"}
-"I have to meet mohammed tonight" → {"kind":"addMeeting", "title":"Meet Mohammed", "date":"2025-10-05", "time":"20:00"}
-"Meeting with team at 2pm" → {"kind":"addMeeting", "title":"Meeting with team", "date":"2025-10-05", "time":"14:00"}
-"I have 3 homeworks next week" → {"kind":"addHomeworks", "count":3, "dueRange":"next-week"}
-"I'm tired today" → {"kind":"setMood", "mood":"tired"}
-"I have work early tomorrow" → {"kind":"setEarlyWork", "earlyWorkTomorrow":true}
-"Add coffee breaks and TV time" → {"kind":"addBreaks"}
-"Add TV time" → {"kind":"addLeisureTV"}
-"Study for math test" → {"kind":"genericTask", "title":"Study for math test", "priority":"normal"}
+"Meeting with dentist tomorrow 3pm" → {"kind":"addMeeting", "title":"Dentist Appointment", "date":"2025-10-06", "time":"15:00"}
+"I have 3 homeworks due next week" → {"kind":"addHomeworks", "count":3, "dueRange":"next-week"}
+"I'm feeling tired today" → {"kind":"setMood", "mood":"tired"}
+"Need to work early tomorrow" → {"kind":"setEarlyWork", "earlyWorkTomorrow":true}
+"Add coffee breaks" → {"kind":"addBreaks"}
+"Watch TV tonight" → {"kind":"addLeisureTV"}
+"Buy groceries tomorrow" → {"kind":"genericTask", "title":"Buy groceries", "priority":"normal"}
 
-Valid kinds: addExam, addMeeting, addHomeworks, addBreaks, addLeisureTV, setMood, setEarlyWork, genericTask
-Valid moods: tired, stressed, motivated, focused, relaxed, none
-Valid priorities: high, normal, low
-Dates in YYYY-MM-DD format, times in HH:mm format (24-hour).`;
+INSTRUCTIONS:
+- Extract ONE JSON object matching the schema
+- Choose the most specific kind that fits the request
+- If unsure between kinds, prefer the more specific one (e.g., addExam over genericTask for test-related requests)
+- Do not explain, just return valid JSON`;
 
       const response = await openai.chat.completions.create({
         model: "gpt-5",
