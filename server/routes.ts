@@ -1269,9 +1269,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Tool-calling: model orchestrates planner tools
   app.post("/api/plan/apply", async (req, res) => {
     try {
-      const { userId = MOCK_USER_ID, timezone = "Asia/Riyadh", intent, now } = req.body || {};
+      const { userId = MOCK_USER_ID, timezone = "Asia/Riyadh", intent, now, mode = "auto" } = req.body || {};
       const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
       const model = process.env.OPENAI_MODEL || "gpt-5";
+
+      // A) DIRECT MODE: apply intent immediately without model
+      if (mode === "direct" && intent) {
+        const parsed = parsedIntentSchema.parse(intent);
+        const out = await plannerEngine.applyIntent(parsed, userId, timezone);
+        return res.json({ applied: true, changes: out.changes ?? [], items: out.items ?? [] });
+      }
 
       const tools = [
         {
@@ -1332,7 +1339,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      return res.json({ toolResults });
+      // Fallback: apply directly if no tool calls but we have an intent
+      if (toolResults.length === 0 && intent) {
+        const parsed = parsedIntentSchema.parse(intent);
+        const out = await plannerEngine.applyIntent(parsed, userId, timezone);
+        return res.json({ applied: true, changes: out.changes ?? [], items: out.items ?? [] });
+      }
+
+      return res.json({ applied: toolResults.length > 0, toolResults });
     } catch (err: any) {
       console.error("/api/plan/apply error:", err?.message || err);
       res.status(500).json({ error: "failed_to_apply_plan" });
@@ -1343,7 +1357,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/realtime/session", async (_req, res) => {
     try {
       const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-      const model = process.env.OPENAI_MODEL || "gpt-5";
+      const model = process.env.OPENAI_REALTIME_MODEL || process.env.OPENAI_MODEL || "gpt-realtime";
       const session = await client.realtime.sessions.create({ model });
       res.json(session);
     } catch (err: any) {
@@ -1359,10 +1373,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!message) return res.status(400).json({ error: "message_required" });
 
       const model = process.env.OPENAI_MODEL || "gpt-5";
+      const MUST_CALL = "\nYou MUST call at least one tool to modify or inspect the plan. Never reply with text only when the user asks to schedule, move, reschedule, plan, or summarize.";
       const resp = await agentClient.responses.create({
         model,
         input: [
-          { role: "system", content: COORDINATOR_PROMPT },
+          { role: "system", content: COORDINATOR_PROMPT + MUST_CALL },
           { role: "user", content: message },
         ],
         tools: agentTools as any,
@@ -1380,6 +1395,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             toolOutputs.push({ id: c.id, name: c.name, output: out });
           }
         }
+      }
+
+      // Force a tool if none emitted but message clearly requests scheduling
+      if (toolOutputs.length === 0 && /\b(add|schedule|move|reschedule|plan)\b/i.test(message)) {
+        const out = await dispatchTool("apply_intent", { userId, timezone, intent: { kind: "genericTask", title: message } });
+        toolOutputs.push({ id: "forced-apply", name: "apply_intent", output: out });
       }
 
       let summary = "";
