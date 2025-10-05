@@ -10,6 +10,139 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 dayjs.extend(customParseFormat);
 
+// Check if a given window is conflict-free
+async function isWindowFree(
+  userId: string,
+  slotStart: dayjs.Dayjs,
+  minutes: number,
+  tz: string
+): Promise<boolean> {
+  const slotEnd = slotStart.add(minutes, "minute");
+  const items = await storage.getItems(userId, {
+    start: slotStart.toDate(),
+    end: slotEnd.toDate(),
+  });
+  return !items.some((it) => {
+    if (!it.start) return false;
+    const s = dayjs(it.start).tz(tz);
+    const e = it.end ? dayjs(it.end).tz(tz) : s.add(it.durationMinutes || 30, "minute");
+    return s.isBefore(slotEnd) && e.isAfter(slotStart);
+  });
+}
+
+// Compact a single day by left-packing flexible items without causing conflicts
+export async function compactDay(userId: string, isoDate: string, tz: string): Promise<void> {
+  const user = await storage.getUser(userId);
+  if (!user) return;
+
+  const dayStart = dayjs.tz(isoDate, tz).startOf("day");
+  const dayEnd = dayStart.endOf("day");
+
+  const items = (await storage.getItems(userId, {
+    start: dayStart.toDate(),
+    end: dayEnd.toDate(),
+  }))
+    .filter((i) => i.start && !i.fixed)
+    .sort((a, b) => dayjs(a.start!).valueOf() - dayjs(b.start!).valueOf());
+
+  let cursor = dayStart.hour(user.workStartHour).minute(0);
+  for (const it of items) {
+    const plannedStart = dayjs(it.start!).tz(tz);
+    const duration = it.durationMinutes
+      || (it.end ? dayjs(it.end).diff(plannedStart, "minute") : 30);
+
+    // Nudge cursor forward to avoid past and to within work hours
+    if (cursor.isBefore(dayStart.hour(user.workStartHour))) {
+      cursor = dayStart.hour(user.workStartHour).minute(0);
+    }
+
+    // Pack if free; otherwise, keep original
+    if (await isWindowFree(userId, cursor, duration, tz)) {
+      await storage.updateItem(it.id, userId, {
+        start: cursor.toDate(),
+        end: cursor.add(duration, "minute").toDate(),
+      } as any);
+      cursor = cursor.add(duration, "minute");
+    } else {
+      // Try a small scan forward (simple compaction)
+      let placed = false;
+      let probe = cursor;
+      for (let k = 0; k < 6; k++) { // up to +30 minutes in 5-min steps
+        probe = probe.add(5, "minute");
+        if (await isWindowFree(userId, probe, duration, tz)) {
+          await storage.updateItem(it.id, userId, {
+            start: probe.toDate(),
+            end: probe.add(duration, "minute").toDate(),
+          } as any);
+          cursor = probe.add(duration, "minute");
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        // Keep original placement and move cursor after it
+        cursor = plannedStart.add(duration, "minute");
+      }
+    }
+  }
+}
+
+// Given a set of same-day flexible tasks with deadlines, drop longest to reduce lateness (Moore–Hodgson)
+function dropLongestToReduceLateness(tasks: Array<{ id: string; duration: number; deadline: dayjs.Dayjs }>) {
+  const sorted = tasks
+    .slice()
+    .sort((a, b) => a.deadline.valueOf() - b.deadline.valueOf());
+  const kept: typeof tasks = [];
+  let total = 0;
+
+  for (const t of sorted) {
+    kept.push(t);
+    total += t.duration;
+    // If finishing after t.deadline, remove the longest so far
+    if (dayjs().add(total, "minute").isAfter(t.deadline)) {
+      kept.sort((x, y) => y.duration - x.duration);
+      const removed = kept.shift();
+      total -= removed!.duration;
+    }
+  }
+  return kept;
+}
+
+// Attempt to repair an overfull day by dropping the longest task among deadline-constrained flexible tasks
+async function repairDayWithMooreHodgson(userId: string, isoDate: string, tz: string): Promise<number> {
+  const dayStart = dayjs.tz(isoDate, tz).startOf("day");
+  const dayEnd = dayStart.endOf("day");
+  const items = await storage.getItems(userId, {
+    start: dayStart.toDate(),
+    end: dayEnd.toDate(),
+  });
+
+  // Consider flexible tasks with deadlines
+  const candidates = items.filter((i) => i.type === "task" && !i.fixed && i.deadline);
+  if (candidates.length === 0) return 0;
+
+  const mhInput = candidates.map((i) => ({
+    id: i.id,
+    duration: i.durationMinutes || 30,
+    deadline: dayjs(i.deadline as Date).tz(tz),
+  }));
+
+  const kept = dropLongestToReduceLateness(mhInput);
+  const keptIds = new Set(kept.map((k) => k.id));
+  const toDrop = candidates.filter((c) => !keptIds.has(c.id));
+
+  for (const d of toDrop) {
+    await storage.updateItem(d.id, userId, {
+      start: null as any,
+      end: null as any,
+      notes: (d as any).notes ? `${(d as any).notes} | Dropped for lateness` : "Dropped for lateness",
+      tags: [...(d.tags || []), "reschedule"],
+    } as any);
+  }
+
+  return toDrop.length;
+}
+
 export interface ExplanationResult {
   itemId: string;
   scheduledSlot: string;
@@ -55,6 +188,7 @@ export class PlannerEngine {
       latestHour: number;
       durationMinutes: number;
       avoidHours?: number[];
+      deadline?: dayjs.Dayjs;
     }
   ): Promise<dayjs.Dayjs> {
     const { habitLearn, mood, sleepH, meetings } = await this.getLearningContext(userId, day, timezone);
@@ -66,19 +200,34 @@ export class PlannerEngine {
       // Skip avoided hours
       if (constraints.avoidHours?.includes(hour)) continue;
 
-      // Check snooze risk for evening heavy tasks
+      const slotStart = day.hour(hour).minute(0);
+
+      // 1) Filter conflicts first
+      const free = await isWindowFree(userId, slotStart, constraints.durationMinutes, timezone);
+      if (!free) continue;
+
+      // 2) Compute risk + learned score
       const risk = learningService.snoozeRisk({ hour, sleepH, mood, meetings });
-      
-      // Skip high-risk slots (> 0.6) for tasks requiring focus
       if (risk > 0.6 && constraints.durationMinutes > 45) continue;
 
-      // Score this slot using learning signals
-      const score = learningService.scoreSlot(
+      const learnedScore = learningService.scoreSlot(
         habitLearn,
         weekday,
         hour,
         { sleepH, mood, meetings }
       );
+
+      // 3) Add deadline pressure (EDF/LST signal)
+      let deadlineUrgency = 0;
+      if (constraints.deadline) {
+        const slackMin = Math.max(
+          1,
+          constraints.deadline.diff(slotStart, "minute") - (constraints.durationMinutes || 0)
+        );
+        deadlineUrgency = 1 / (1 + slackMin);
+      }
+
+      const score = learnedScore - risk + deadlineUrgency; // curfew penalty baked into scoreSlot
 
       slots.push({ hour, score });
     }
@@ -431,6 +580,7 @@ export class PlannerEngine {
         earliestHour: user.workEndHour,
         latestHour: user.bedtimeHour - 2,
         durationMinutes: studyDuration,
+        deadline: examDate.endOf('day'),
       });
 
       const studyBlock = await storage.createItem({
@@ -458,6 +608,7 @@ export class PlannerEngine {
           earliestHour: user.workEndHour - 1,
           latestHour: user.bedtimeHour - 1,
           durationMinutes: quizDuration,
+          deadline: examDate.endOf('day'),
         });
 
         const quiz = await storage.createItem({
@@ -483,6 +634,7 @@ export class PlannerEngine {
       earliestHour: user.workEndHour,
       latestHour: user.bedtimeHour - 2,
       durationMinutes: cramDuration,
+      deadline: examDate.endOf('day'),
     });
 
     const cramSession = await storage.createItem({
@@ -496,6 +648,15 @@ export class PlannerEngine {
       tags: ["cram", "exam-prep"],
     });
     items.push(cramSession);
+
+    // Compact exam day and the previous study days
+    await compactDay(user.id, examDate.format('YYYY-MM-DD'), timezone);
+    for (const sd of studyDays) {
+      await compactDay(user.id, sd.format('YYYY-MM-DD'), timezone);
+    }
+
+    // If still overfull, drop one by Moore–Hodgson on exam day
+    await repairDayWithMooreHodgson(user.id, examDate.format('YYYY-MM-DD'), timezone);
 
     return items;
   }
@@ -568,6 +729,7 @@ export class PlannerEngine {
           earliestHour: user.workEndHour,
           latestHour: user.bedtimeHour - 2,
           durationMinutes: homeworkDuration,
+          deadline: dueDate.endOf('day'),
         });
 
         const workBlock = await storage.createItem({
@@ -583,6 +745,18 @@ export class PlannerEngine {
         items.push(workBlock);
       }
     }
+
+    // Compact each work day and due day
+    await compactDay(user.id, dueDate.format('YYYY-MM-DD'), timezone);
+    for (let i = 1; i <= count; i++) {
+      const workDay = dueDate.subtract(count - i + 1, 'days');
+      if (workDay.day() >= 1 && workDay.day() <= 4) {
+        await compactDay(user.id, workDay.format('YYYY-MM-DD'), timezone);
+      }
+    }
+
+    // Attempt lateness repair on due date
+    await repairDayWithMooreHodgson(user.id, dueDate.format('YYYY-MM-DD'), timezone);
 
     return items;
   }
@@ -657,6 +831,10 @@ export class PlannerEngine {
         }
       }
     }
+
+    // Tiny compaction after squeezing
+    const todayIso = dayjs().tz(timezone).format('YYYY-MM-DD');
+    await compactDay(userId, todayIso, timezone);
   }
 
   private async adjustScheduleForEarlyWork(userId: string, timezone: string): Promise<void> {
@@ -750,11 +928,10 @@ export class PlannerEngine {
         const prevItem = scheduledItems[i - 1];
         if (prevItem.end) {
           const prevEnd = dayjs(prevItem.end).tz(timezone);
-          const continuousFocusMinutes = itemStart.diff(prevEnd, 'minute');
-          
-          if (prevEnd.isSame(itemStart, 'day') && continuousFocusMinutes >= 0 && continuousFocusMinutes < 10) {
-            const totalDuration = dayjs(prevItem.start!).diff(itemStart, 'minute') * -1;
-            if (totalDuration >= 60) {
+          const gapMin = itemStart.diff(prevEnd, 'minute');
+          if (prevEnd.isSame(itemStart, 'day') && gapMin >= 0 && gapMin < 10) {
+            const streak = (prevItem.durationMinutes || 0) + (item.durationMinutes || 0);
+            if (streak >= 60) {
               shouldInsertBreak = true;
               breakReason = "After 60+ minutes of continuous focus";
             }
@@ -847,12 +1024,10 @@ export class PlannerEngine {
     const user = await storage.getUser(userId);
     if (!user) return null;
 
-    // Check if we have at least 45 minutes of free time right now
+    // Check if we have at least 45 minutes of free time right now within ok window
     const currentHour = nowDayjs.hour();
-    const currentMinute = nowDayjs.minute();
-    
-    // Don't suggest during work hours or late night
-    if (currentHour < user.workEndHour || currentHour >= user.bedtimeHour - 1) {
+    const okWindow = currentHour >= user.workEndHour && currentHour < user.bedtimeHour - 1;
+    if (!okWindow) {
       return null;
     }
 
@@ -927,9 +1102,10 @@ export class PlannerEngine {
       
       // Use findBestSlot with learned preferences
       const bestSlot = await this.findBestSlot(userId, searchDay, timezone, {
-        earliestHour: dayOffset === 0 ? nowDayjs.hour() + 1 : user.workEndHour,
+        earliestHour: dayOffset === 0 ? Math.max(nowDayjs.add(1, 'hour').hour(), user.workStartHour) : user.workStartHour,
         latestHour: user.bedtimeHour - 1,
         durationMinutes: missedItem.durationMinutes || 30,
+        deadline: missedItem.deadline ? dayjs(missedItem.deadline).tz(timezone) : undefined,
       });
 
       // Check if this slot is actually free
