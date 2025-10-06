@@ -1,3 +1,28 @@
+Environment variables
+
+Backend reads environment from process.env and .env files (via dotenv loaded in server/index.ts).
+
+Required
+- DATABASE_URL: Postgres connection string (Supabase/Neon). Example:
+  postgresql://USER:PASSWORD@HOST:PORT/DB?sslmode=require
+- OPENAI_API_KEY: your OpenAI key
+- TZ: e.g. America/Los_Angeles
+
+Local development
+1) Create .env in repo root:
+   DATABASE_URL=...
+   OPENAI_API_KEY=...
+   TZ=Asia/Riyadh
+2) Start server:
+   npm run dev:dotenv
+
+Railway
+- Set the same variables in Railway → Variables.
+- Build: npm run build
+- Start: npm run start:dotenv (loads Railway variables)
+
+iOS app
+- Backend URL is read from ios/NextisApp/NextisApp/Info.plist (API_BASE_URL).
 # Deployment Configuration
 
 ## Current Deployment

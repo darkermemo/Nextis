@@ -554,19 +554,37 @@ export class PlannerEngine {
         break;
 
       case "genericTask":
-        // Use learned duration for tasks if not explicitly specified
-        const taskDuration = intent.durationMinutes || await this.getLearnedDuration(userId, "task", 30);
-        
-        const taskItem = await storage.createItem({
+        // Use learned duration and schedule by default
+        const taskDuration = intent.durationMinutes || await this.getLearnedDuration(userId, "task", 45);
+
+        // If a specific time is present, use it; otherwise pick best slot today within work/betdime window
+        const dateBase = intent.date ? dayjs(intent.date).tz(timezone) : now;
+        const timeStr = (intent as any).startTime || (intent as any).time;
+        let start: dayjs.Dayjs;
+        if (timeStr) {
+          start = dayjs(`${dateBase.format('YYYY-MM-DD')} ${timeStr}`).tz(timezone);
+        } else {
+          // Find best slot today using learning signals (between work end and bedtime - 1h)
+          start = await this.findBestSlot(user.id, dateBase, timezone, {
+            earliestHour: user.workEndHour,
+            latestHour: user.bedtimeHour - 1,
+            durationMinutes: taskDuration,
+          });
+        }
+
+        const scheduledTask = await storage.createItem({
           userId,
           type: "task",
           title: intent.title || "New Task",
-          priority: intent.priority || "normal",
+          start: start.toDate(),
+          end: start.add(taskDuration, 'minutes').toDate(),
           durationMinutes: taskDuration,
+          priority: intent.priority || "normal",
           deadline: intent.date ? dayjs(intent.date).toDate() : undefined,
+          tags: ["auto-scheduled"],
         });
-        createdItems.push(taskItem);
-        changes.push(`Added task: ${taskItem.title}`);
+        createdItems.push(scheduledTask);
+        changes.push(`Scheduled task: ${scheduledTask.title} at ${start.format('h:mm A')}`);
         break;
     }
 

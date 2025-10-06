@@ -223,7 +223,7 @@ struct ChatViewFull: View {
 		
         messages.append(.init(type: .user, content: txt, timestampText: Date().formatted(date: .omitted, time: .shortened), changes: nil))
 		
-		do {
+			do {
 			let resp = try await client.sendChatMessage(txt)
 			
 			// Show what was created
@@ -243,10 +243,37 @@ struct ChatViewFull: View {
 				responseText = "✅ Done! I've added that to your schedule."
 			}
 			
+			// If backend created items, append a short, explicit summary
+			if !resp.items.isEmpty {
+				let createdList = resp.items.prefix(5).enumerated().map { idx, it in
+					let when: String = {
+						if let s = it.start, let d = ISO8601DateFormatter().date(from: s) { return DateFormatter.localizedString(from: d, dateStyle: .none, timeStyle: .short) }
+						if let d = it.deadline, let dd = ISO8601DateFormatter().date(from: d) { return DateFormatter.localizedString(from: dd, dateStyle: .short, timeStyle: .short) }
+						return "unscheduled"
+					}()
+					return "\(idx+1). \(it.title) — \(when)"
+				}.joined(separator: "\n")
+				responseText += (responseText.isEmpty ? "" : "\n\n") + "✅ Created \(resp.items.count) item(s):\n" + createdList
+			}
+
 			messages.append(.init(type: .assistant, content: responseText, timestampText: Date().formatted(date: .omitted, time: .shortened), changes: resp.changes))
 			
 			// Refresh Next Actions to show newly created items
 			await loadNext()
+
+			// If user asked to show next actions explicitly, answer with a list
+			let lowered = txt.lowercased()
+			if lowered.contains("next 3 actions") || lowered.contains("next actions") || lowered.contains("what's next") || lowered.contains("show my next") {
+				if let data = nextActions, !data.items.isEmpty {
+					let list = data.items.prefix(3).enumerated().map { idx, it in
+						"\(idx+1). \(it.title)"
+					}.joined(separator: "\n")
+					let answer = "Here are your next 3 actions:\n" + list
+					messages.append(.init(type: .assistant, content: answer, timestampText: Date().formatted(date: .omitted, time: .shortened), changes: nil))
+				} else {
+					messages.append(.init(type: .assistant, content: "You have no next actions right now.", timestampText: Date().formatted(date: .omitted, time: .shortened), changes: nil))
+				}
+			}
 			
 			// If items were created, notify other tabs to refresh
 			if !resp.items.isEmpty {
@@ -264,7 +291,13 @@ struct ChatViewFull: View {
 				print("  URLError code: \(urlError.code.rawValue)")
 				print("  URLError description: \(urlError.localizedDescription)")
 			}
-			messages.append(.init(type: .assistant, content: "Sorry, I couldn't process that request.\n\n⚠️ Error: \(error.localizedDescription)\n\nMake sure your backend is running and accessible.", timestampText: Date().formatted(date: .omitted, time: .shortened), changes: nil))
+			// Fallback: call agent endpoint to try tool calling (more robust)
+			if let agent = try? await client.agentRespond(txt), let summary = agent.summary, !summary.isEmpty {
+				messages.append(.init(type: .assistant, content: summary, timestampText: Date().formatted(date: .omitted, time: .shortened), changes: nil))
+				await loadNext()
+			} else {
+				messages.append(.init(type: .assistant, content: "Sorry, I couldn't process that request.\n\n⚠️ Error: \(error.localizedDescription)", timestampText: Date().formatted(date: .omitted, time: .shortened), changes: nil))
+			}
 		}
 		
 		sending = false
@@ -2263,6 +2296,24 @@ extension APIClient {
 			throw URLError(.badServerResponse)
 		}
 		return try jsonDecoder.decode(ChatResponse.self, from: data)
+	}
+}
+
+// MARK: - Agent endpoint fallback (tool-calling orchestrator)
+struct AgentToolCall: Codable { let id: String?; let name: String? }
+struct AgentResponse: Codable { let tools: [AgentToolCall]?; let summary: String? }
+
+extension APIClient {
+	func agentRespond(_ message: String) async throws -> AgentResponse {
+		struct Body: Encodable { let message: String; let timezone: String }
+		let url = config.baseURL.appendingPathComponent("/api/agent/respond")
+		var req = URLRequest(url: url)
+		req.httpMethod = "POST"
+		req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+		req.httpBody = try JSONEncoder().encode(Body(message: message, timezone: config.timezoneProvider()))
+		let (data, resp) = try await session.data(for: req)
+		guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+		return try jsonDecoder.decode(AgentResponse.self, from: data)
 	}
 }
 

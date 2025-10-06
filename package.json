@@ -10,6 +10,8 @@
     "dev": "NODE_ENV=development tsx server/index.ts",
     "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "start": "NODE_ENV=production node dist/index.js",
+    "start:dotenv": "NODE_ENV=production node -r dotenv/config dist/index.js",
+    "dev:dotenv": "NODE_ENV=development node -r dotenv/config node_modules/tsx/dist/cli.js server/index.ts",
     "check": "tsc",
     "db:push": "drizzle-kit push"
   },
