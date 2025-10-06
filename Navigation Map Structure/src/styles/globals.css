@@ -1,0 +1,280 @@
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --font-size: 16px;
+  /* Clean iOS background */
+  --background: #f2f2f7;
+  --background-gradient: linear-gradient(to bottom, #f8f9fa 0%, #f2f2f7 100%);
+  --foreground: #1d1d1f;
+  
+  /* Glass card */
+  --card: rgba(255, 255, 255, 0.8);
+  --card-foreground: #1d1d1f;
+  --card-border: rgba(209, 213, 219, 0.3);
+  
+  --popover: rgba(255, 255, 255, 0.95);
+  --popover-foreground: #1d1d1f;
+  
+  /* iOS System Colors */
+  --primary: #007AFF;
+  --primary-foreground: #ffffff;
+  --primary-light: #4da3ff;
+  
+  --secondary: #8E8E93;
+  --secondary-foreground: #ffffff;
+  
+  --muted: #f2f2f7;
+  --muted-foreground: #86868b;
+  
+  --accent: rgba(120, 120, 128, 0.12);
+  --accent-foreground: #1d1d1f;
+  
+  --destructive: #FF3B30;
+  --destructive-foreground: #ffffff;
+  
+  --success: #34C759;
+  --warning: #FF9500;
+  --info: #5AC8FA;
+  
+  --border: rgba(60, 60, 67, 0.08);
+  --input: transparent;
+  --input-background: rgba(120, 120, 128, 0.12);
+  --switch-background: #e5e5ea;
+  
+  --font-weight-medium: 600;
+  --font-weight-normal: 400;
+  --ring: rgba(0, 122, 255, 0.3);
+  
+  --chart-1: #007AFF;
+  --chart-2: #34C759;
+  --chart-3: #5AC8FA;
+  --chart-4: #FF9500;
+  --chart-5: #FF3B30;
+  
+  --radius: 0.875rem;
+  --radius-xl: 1.25rem;
+  
+  /* Subtle Glassmorphism */
+  --glass-bg: rgba(255, 255, 255, 0.6);
+  --glass-border: rgba(209, 213, 219, 0.3);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.08);
+  
+  --sidebar: rgba(255, 255, 255, 0.8);
+  --sidebar-foreground: #1d1d1f;
+  --sidebar-primary: #007AFF;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgba(120, 120, 128, 0.12);
+  --sidebar-accent-foreground: #1d1d1f;
+  --sidebar-border: rgba(60, 60, 67, 0.08);
+  --sidebar-ring: rgba(0, 122, 255, 0.3);
+}
+
+.dark {
+  --background: #000000;
+  --background-gradient: linear-gradient(to bottom, #0a0a0a 0%, #000000 100%);
+  --foreground: #f5f5f7;
+  
+  --card: rgba(28, 28, 30, 0.8);
+  --card-foreground: #f5f5f7;
+  --card-border: rgba(84, 84, 88, 0.3);
+  
+  --popover: rgba(28, 28, 30, 0.95);
+  --popover-foreground: #f5f5f7;
+  
+  --primary: #0A84FF;
+  --primary-foreground: #ffffff;
+  --primary-light: #409cff;
+  
+  --secondary: #98989d;
+  --secondary-foreground: #ffffff;
+  
+  --muted: #1c1c1e;
+  --muted-foreground: #98989d;
+  
+  --accent: rgba(120, 120, 128, 0.24);
+  --accent-foreground: #f5f5f7;
+  
+  --destructive: #FF453A;
+  --destructive-foreground: #ffffff;
+  
+  --success: #32D74B;
+  --warning: #FF9F0A;
+  --info: #64D2FF;
+  
+  --border: rgba(84, 84, 88, 0.3);
+  --input: rgba(120, 120, 128, 0.2);
+  --ring: rgba(10, 132, 255, 0.4);
+  
+  --font-weight-medium: 600;
+  --font-weight-normal: 400;
+  
+  --chart-1: #0A84FF;
+  --chart-2: #32D74B;
+  --chart-3: #64D2FF;
+  --chart-4: #FF9F0A;
+  --chart-5: #FF453A;
+  
+  --glass-bg: rgba(28, 28, 30, 0.6);
+  --glass-border: rgba(84, 84, 88, 0.3);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+  
+  --sidebar: rgba(28, 28, 30, 0.8);
+  --sidebar-foreground: #f5f5f7;
+  --sidebar-primary: #0A84FF;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgba(120, 120, 128, 0.24);
+  --sidebar-accent-foreground: #f5f5f7;
+  --sidebar-border: rgba(84, 84, 88, 0.3);
+  --sidebar-ring: rgba(10, 132, 255, 0.4);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-card-border: var(--card-border);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-light: var(--primary-light);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-switch-background: var(--switch-background);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--radius-xl);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    background: var(--background-gradient);
+    background-attachment: fixed;
+  }
+}
+
+/* Glassmorphism utilities */
+@layer utilities {
+  .glass {
+    background: var(--glass-bg);
+    backdrop-filter: blur(30px) saturate(150%);
+    -webkit-backdrop-filter: blur(30px) saturate(150%);
+    border: 1px solid var(--glass-border);
+  }
+  
+  .glass-card {
+    background: var(--card);
+    backdrop-filter: blur(30px) saturate(150%);
+    -webkit-backdrop-filter: blur(30px) saturate(150%);
+    border: 1px solid var(--card-border);
+    box-shadow: 0 4px 16px 0 rgba(0, 0, 0, 0.06);
+  }
+  
+  .glass-heavy {
+    background: var(--card);
+    backdrop-filter: blur(40px) saturate(160%);
+    -webkit-backdrop-filter: blur(40px) saturate(160%);
+    border: 1px solid var(--card-border);
+    box-shadow: 0 8px 24px 0 rgba(0, 0, 0, 0.08);
+  }
+  
+  .ios-shadow {
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+  }
+  
+  .ios-shadow-lg {
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+  }
+}
+
+/**
+ * Base typography. This is not applied to elements which have an ancestor with a Tailwind text class.
+ */
+@layer base {
+  :where(:not(:has([class*=" text-"]), :not(:has([class^="text-"])))) {
+    h1 {
+      font-size: var(--text-2xl);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h2 {
+      font-size: var(--text-xl);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h3 {
+      font-size: var(--text-lg);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    h4 {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    p {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-normal);
+      line-height: 1.5;
+    }
+
+    label {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    button {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-medium);
+      line-height: 1.5;
+    }
+
+    input {
+      font-size: var(--text-base);
+      font-weight: var(--font-weight-normal);
+      line-height: 1.5;
+    }
+  }
+}
+
+html {
+  font-size: var(--font-size);
+}

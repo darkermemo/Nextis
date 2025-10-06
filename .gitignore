@@ -6,3 +6,5 @@ vite.config.ts.*
 *.tar.gz
 .env
 .env.local
+# dev-only
+test-parser.mjs

@@ -10,7 +10,8 @@ struct NextisApp: App {
 	}()
 	var body: some Scene {
 		WindowGroup {
-			WeekMindRoot(client: client)
+			AppRootTabs(client: client)
+				.preferredColorScheme(.light)
 		}
 	}
 }

@@ -132,17 +132,17 @@ INSTRUCTIONS:
 - If unsure between kinds, prefer the more specific one (e.g., addExam over genericTask for test-related requests)
 - Do not explain, just return valid JSON`;
 
-      // Prefer structured outputs via Responses API with pre-parse hints
-      const r = await openai.responses.create({
+      // Use Chat Completions with JSON schema (standard format)
+      const r = await openai.chat.completions.create({
         model: MODEL,
-        input: [
+        messages: [
           { role: "system", content: systemPrompt + "\n\nGUIDELINES:\n- Use provided seed fields as authoritative; fill ONLY missing ones.\n- exam/midterm/test -> addExam with date,startTime,durationMinutes\n- meeting/sync -> addMeeting with date,startTime,durationMinutes\n- dentist/doctor/appointment -> addAppointment\n- wedding/party/dinner/social -> addSocial\n- 'from X to Y' -> use startTime/endTime\n- 'due'/'by'/'before' -> set due or before\n- 'estimate' -> set estimateMinutes\n- gym/workout sessions -> workoutPlan with count\n- If you cannot find date/time for an event, leave them null (do NOT invent)." },
           { role: "user", content: `Seed: ${JSON.stringify(hints)}\n\nUser: ${text}\nTimezone: ${timezone}` },
         ],
         response_format: { type: "json_schema", json_schema: IntentJsonSchema },
       });
 
-      const asText = (r as any)?.output?.[0]?.content?.[0]?.text as string | undefined;
+      const asText = r.choices[0]?.message?.content;
       let result = asText ? JSON.parse(asText) : {};
       
       // Merge: preParse values are authoritative; only use model values if preParse didn't extract them

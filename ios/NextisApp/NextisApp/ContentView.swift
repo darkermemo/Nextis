@@ -6,9 +6,7 @@ struct RootView: View {
 	@State private var showExplainer = false
 	var body: some View {
 		NavigationStack {
-			TodayTasksView(client: client, onExplain: { item in
-				selected = item; showExplainer = true
-			}, onCompleted: { _ in })
+			TasksTSXView(client: client)
 			.navigationTitle("Nextis")
 		}
 		.sheet(isPresented: $showExplainer) {

@@ -1,3 +1,8 @@
+# Railway Configuration for Nextis
+# Project: astonishing-analysis
+# Production URL: https://nextis-production.up.railway.app
+# Project ID: fdd7b305-6196-4c38-8ab9-626259d1d64f
+
 [build]
 builder = "nixpacks"
 

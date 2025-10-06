@@ -1,32 +1,98 @@
 import SwiftUI
 
-// MARK: - Root Tabs
+// MARK: - Design Scaffold (header + mood + notifications)
+struct DesignScaffold<Content: View>: View {
+    let client: APIClient
+    let title: String
+    var showMood: Bool = false
+    var showNotifications: Bool = false
+    @ViewBuilder var content: () -> Content
+    @State private var dayState: DayState?
+    var body: some View {
+        VStack(spacing: 0) {
+            TopHeaderView(title: title)
+            if showMood && (dayState == nil || dayState?.mood == .none) {
+                MoodCheckInBanner(client: client, onSet: { Task { await load() } })
+            }
+            if showNotifications { NotificationBannerView(client: client) }
+            content()
+        }
+        .task { if showMood { await load() } }
+    }
+    private func load() async { dayState = try? await client.getDayState() }
+}
+
+private struct TopHeaderView: View {
+    let title: String
+    var body: some View {
+        GeometryReader { geo in
+            let s = max(0.9, min(1.2, geo.size.width / 390))
+            HStack(spacing: 10 * s) {
+            ZStack {
+                    RoundedRectangle(cornerRadius: 12 * s).fill(Color.blue)
+                    Text("P").font(.system(size: 13 * s, weight: .semibold)).foregroundStyle(.white)
+            }
+                .frame(width: 36 * s, height: 36 * s)
+                Text(title).font(.system(size: 22 * s, weight: .semibold))
+                Spacer()
+                HStack(spacing: 10 * s) {
+                    Image(systemName: "face.smiling").font(.system(size: 20 * s)).foregroundStyle(.secondary)
+                    Image(systemName: "bell").font(.system(size: 20 * s)).foregroundStyle(.secondary)
+                    Image(systemName: "gearshape").font(.system(size: 20 * s)).foregroundStyle(.secondary)
+                    Circle().stroke(Color(.separator), lineWidth: 2).frame(width: 36 * s, height: 36 * s).overlay(Text("JD").font(.system(size: 12 * s, weight: .medium)))
+                }
+            }
+            .padding(.horizontal, 16 * s)
+            .padding(.top, 10 * s)
+            .padding(.bottom, 10 * s)
+            .background(.ultraThinMaterial)
+            .overlay(Divider(), alignment: .bottom)
+        }
+    }
+}
+
+// MARK: - Root Tabs (5 tabs to match Navigation Map)
 struct TabsRootView: View {
-	let client: APIClient
-	var body: some View {
-		TabView {
-			TodayScreen(client: client)
-				.tabItem { Label("Today", systemImage: "checkmark.circle") }
-			CalendarScreen(client: client)
-				.tabItem { Label("Calendar", systemImage: "calendar") }
-			NextActionsScreen(client: client)
-				.tabItem { Label("Next", systemImage: "list.bullet") }
-			NotificationsScreen(client: client)
-				.tabItem { Label("Alerts", systemImage: "bell") }
-			LearningScreen(client: client)
-				.tabItem { Label("Learning", systemImage: "brain.head.profile") }
-			HealthScreen(client: client)
-				.tabItem { Label("Health", systemImage: "heart") }
-			GymScreen(client: client)
-				.tabItem { Label("Gym", systemImage: "dumbbell") }
-			WeeklyScreen(client: client)
-				.tabItem { Label("Weekly", systemImage: "chart.bar") }
-			GmailScreen(client: client)
-				.tabItem { Label("Gmail", systemImage: "envelope") }
-			SettingsScreen(client: client)
-				.tabItem { Label("Settings", systemImage: "gear") }
-		}
-	}
+    let client: APIClient
+    var body: some View {
+        TabView {
+            NavigationStack {
+                ChatViewFull(client: client)
+                    .navigationTitle("Chat")
+                    .navigationBarTitleDisplayMode(.large)
+            }
+            .tabItem { Label("Chat", systemImage: "message.fill") }
+
+            NavigationStack {
+                TasksTSXView(client: client)
+                    .navigationTitle("Tasks")
+                    .navigationBarTitleDisplayMode(.large)
+            }
+            .tabItem { Label("Tasks", systemImage: "checklist") }
+
+            NavigationStack {
+                CalendarListTSXView(client: client)
+                    .navigationTitle("Calendar")
+                    .navigationBarTitleDisplayMode(.large)
+            }
+            .tabItem { Label("Calendar", systemImage: "calendar") }
+
+            NavigationStack {
+                LearningViewFull(client: client)
+                    .navigationTitle("Learning")
+                    .navigationBarTitleDisplayMode(.large)
+            }
+            .tabItem { Label("Learning", systemImage: "brain.head.profile") }
+
+            NavigationStack {
+                InsightsViewFull(client: client)
+                    .navigationTitle("Insights")
+                    .navigationBarTitleDisplayMode(.large)
+            }
+            .tabItem { Label("Insights", systemImage: "chart.bar.fill") }
+        }
+        .tint(.blue)
+    }
 }
 
 // MARK: - Today
@@ -39,12 +105,12 @@ struct TodayScreen: View {
 	var body: some View {
 		NavigationStack {
 			VStack(spacing: 0) {
-				if showMood || (dayState?.mood == .none || dayState == nil) {
-					MoodBanner(client: client, onSet: { showMood = false; Task { await loadDayState() } })
-				}
-				TodayTasksView(client: client, onExplain: { item in selected = item; showExplainer = true }, onCompleted: { _ in })
+			if showMood || (dayState?.mood == .none || dayState == nil) {
+				MoodBanner(client: client, onSet: { showMood = false; Task { await loadDayState() } })
 			}
-			.navigationTitle("Today")
+			TasksTSXView(client: client)
+		}
+		.navigationTitle("Today")
 		}
 		.task { await loadDayState() }
 		.sheet(isPresented: $showExplainer) {
