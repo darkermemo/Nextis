@@ -51,6 +51,19 @@ export function preParse(input: string, tzid = "Asia/Riyadh") {
     res.startTime = `${t[1].padStart(2, "0")}:${t[2]}`;
   }
 
+  // Relative time phrases → convert to absolute start time (and end by duration)
+  const now = dayjs().tz(tzid);
+  if (!res.startTime) {
+    const rel = lower.match(/in\s+(\d+)\s*(minutes?|mins?|m|hours?|hrs?|h)/i);
+    if (rel) {
+      const n = parseInt(rel[1], 10);
+      const unit = rel[2][0] === 'h' ? 'hour' : 'minute';
+      const relStart = now.add(n, unit as any);
+      res.date = relStart.format('YYYY-MM-DD');
+      res.startTime = relStart.format('HH:mm');
+    }
+  }
+
   // Duration
   const dur = input.match(FOR_DUR);
   if (dur) {

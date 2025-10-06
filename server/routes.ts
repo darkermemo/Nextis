@@ -17,6 +17,7 @@ import timezone from "dayjs/plugin/timezone.js";
 import OpenAI from "openai";
 import { IntentJsonSchema } from "./services/openai";
 import { client as agentClient, tools as agentTools, COORDINATOR_PROMPT, dispatchTool } from "./services/agent";
+import { preParse } from "./services/preParse";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -1243,7 +1244,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Message is required" });
       }
 
+      // Pre-parse to extract relative/explicit time hints
+      const pre = preParse(message, timezone);
       const parsed = await llmService.parseCommand(message, timezone);
+
+      // If model did not provide time/date but pre-parse found relative or explicit time, inject them
+      if ((parsed as any)?.kind === 'genericTask') {
+        const p: any = parsed;
+        if (!p.time && !p.startTime && pre.startTime) p.time = pre.startTime;
+        if (!p.date && pre.date) p.date = pre.date;
+        if (!p.durationMinutes && pre.durationMinutes) p.durationMinutes = pre.durationMinutes;
+      }
 
       const intent = parsedIntentSchema.parse(parsed);
 
