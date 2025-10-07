@@ -162,4 +162,4 @@ public struct AnyCodable: Codable {
 	}
 }
 
-public struct APIError: Error, Codable { public let error: String?; public let message: String? }
+public struct APIError: Error, Codable, LocalizedError { public let error: String?; public let message: String?; public var errorDescription: String? { message ?? error ?? "Unknown server error" } }

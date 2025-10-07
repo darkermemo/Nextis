@@ -23,19 +23,16 @@
 	<string>1</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- Railway uses HTTPS by default, which is secure -->
-		<!-- For local development, uncomment the NSAllowsLocalNetworking key below -->
-		<!-- <key>NSAllowsLocalNetworking</key>
-		<true/> -->
-		<!-- Uncomment the following for local HTTP development -->
-		<!-- <key>NSExceptionDomains</key>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+		<key>NSExceptionDomains</key>
 		<dict>
 			<key>localhost</key>
 			<dict>
 				<key>NSExceptionAllowsInsecureHTTPLoads</key>
 				<true/>
 			</dict>
-		</dict> -->
+		</dict>
 	</dict>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
